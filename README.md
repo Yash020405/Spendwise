@@ -55,7 +55,7 @@ A modern expense tracking mobile application built with React Native and Expo.
 ## Project Structure
 
 ```
-Pocket-Expense/
+Spendwise/
 ├── app/
 │   ├── (auth)/           # Authentication screens
 │   │   ├── login.tsx
@@ -145,8 +145,8 @@ PORT=3000
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/Yash020405/Pocket-Expense.git
-   cd Pocket-Expense
+   git clone https://github.com/Yash020405/Spendwise.git
+   cd Spendwise
    ```
 
 2. **Install frontend dependencies**
@@ -187,7 +187,7 @@ PORT=3000
 
 7. **Start the Expo development server**
    ```bash
-   npx expo start --tunnel
+   npx expo start
    ```
 
 8. **Scan QR code** with Expo Go app to run on your device
