@@ -1,0 +1,57 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Expo
+.expo/
+dist/
+*.jsbundle
+web-build/
+
+# Environment variables (KEEP .env.example files)
+.env
+.env.local
+.env.*.local
+server/.env
+
+# Build outputs
+build/
+android/
+ios/
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage/
+
+# Misc
+*.log
+*.tmp
+.temp/
+
+# Expo generated
+expo-env.d.ts
+
+# TypeScript
+*.tsbuildinfo
+
+# Metro bundler
+.metro-health-check*
+
+# Package lock (optional - uncomment if you want to ignore)
+# package-lock.json
+# yarn.lock
