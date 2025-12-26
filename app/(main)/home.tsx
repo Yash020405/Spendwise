@@ -13,9 +13,11 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../utils/ThemeContext';
+import { useToast } from '../../components/Toast';
 import { Card } from '../../components/ui';
 import api from '../../utils/api';
 import AppWalkthrough from '../../components/AppWalkthrough';
+import { syncPendingExpenses, getPendingCount, cacheExpenses, getMergedExpenses } from '../../utils/offlineSync';
 
 const { width } = Dimensions.get('window');
 
@@ -50,6 +52,7 @@ interface User {
 export default function HomeScreen() {
   const { theme, isDark, toggleTheme } = useTheme();
   const router = useRouter();
+  const { showToast } = useToast();
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
@@ -57,6 +60,8 @@ export default function HomeScreen() {
   const [totalSpent, setTotalSpent] = useState(0);
   const [todaySpent, setTodaySpent] = useState(0);
   const [weekSpent, setWeekSpent] = useState(0);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -70,56 +75,57 @@ export default function HomeScreen() {
 
       setUser(JSON.parse(userData));
 
-      // Fetch all expenses and calculate totals from them
+      // Fetch expenses from server
       try {
         const expensesResponse: any = await api.getExpenses(token);
         if (expensesResponse.success && Array.isArray(expensesResponse.data)) {
-          const expenseList = expensesResponse.data;
-
-          // Sort by date descending and take first 5 for recent
-          const sorted = [...expenseList].sort((a: Expense, b: Expense) =>
-            new Date(b.date).getTime() - new Date(a.date).getTime()
-          );
-          setExpenses(sorted.slice(0, 5));
-
-          // Calculate monthly total (current month)
-          const now = new Date();
-          const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-          const monthTotal = expenseList
-            .filter((e: Expense) => new Date(e.date) >= monthStart)
-            .reduce((sum: number, e: Expense) => sum + e.amount, 0);
-          setTotalSpent(monthTotal);
-
-          // Calculate today's total
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          const todayTotal = expenseList
-            .filter((e: Expense) => new Date(e.date) >= today)
-            .reduce((sum: number, e: Expense) => sum + e.amount, 0);
-          setTodaySpent(todayTotal);
-
-          // Calculate week total
-          const weekAgo = new Date();
-          weekAgo.setDate(weekAgo.getDate() - 7);
-          const weekTotal = expenseList
-            .filter((e: Expense) => new Date(e.date) >= weekAgo)
-            .reduce((sum: number, e: Expense) => sum + e.amount, 0);
-          setWeekSpent(weekTotal);
-        } else {
-          setExpenses([]);
-          setTotalSpent(0);
-          setTodaySpent(0);
-          setWeekSpent(0);
+          // Cache server data
+          await cacheExpenses(expensesResponse.data);
         }
-      } catch (err) {
-        setExpenses([]);
-        setTotalSpent(0);
-        setTodaySpent(0);
-        setWeekSpent(0);
+      } catch (err: any) {
+        // Network error - we'll use cached + offline data (no error toast)
+        console.log('Network error, using cached data:', err.message);
+      }
+
+      // Always use merged data (cached server + offline pending)
+      try {
+        const expenseList = await getMergedExpenses();
+
+        // Sort by date descending and take first 5 for recent
+        const sorted = [...expenseList].sort((a: any, b: any) =>
+          new Date(b.date).getTime() - new Date(a.date).getTime()
+        );
+        setExpenses(sorted.slice(0, 5) as Expense[]);
+
+        // Calculate monthly total (current month)
+        const now = new Date();
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const monthTotal = expenseList
+          .filter((e: any) => new Date(e.date) >= monthStart)
+          .reduce((sum: number, e: any) => sum + e.amount, 0);
+        setTotalSpent(monthTotal);
+
+        // Calculate today's total
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todayTotal = expenseList
+          .filter((e: any) => new Date(e.date) >= today)
+          .reduce((sum: number, e: any) => sum + e.amount, 0);
+        setTodaySpent(todayTotal);
+
+        // Calculate week total
+        const weekAgo = new Date();
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        const weekTotal = expenseList
+          .filter((e: any) => new Date(e.date) >= weekAgo)
+          .reduce((sum: number, e: any) => sum + e.amount, 0);
+        setWeekSpent(weekTotal);
+      } catch (mergeErr) {
+        console.error('Failed to merge expenses:', mergeErr);
       }
 
     } catch (error) {
-      console.error('Failed to fetch data:', error);
+      console.log('Fetch data error:', error);
     } finally {
       setLoading(false);
     }
@@ -128,11 +134,65 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       fetchData();
+      checkAndSyncPending();
     }, [])
   );
 
+  // Check for pending offline expenses and sync them
+  const checkAndSyncPending = async () => {
+    try {
+      const count = await getPendingCount();
+      setPendingCount(count);
+
+      if (count > 0) {
+        // Try to sync, but don't block if it fails
+        setSyncing(true);
+        const token = await AsyncStorage.getItem('@auth_token');
+        if (token) {
+          try {
+            const result = await syncPendingExpenses(token);
+            if (result.synced > 0) {
+              showToast({ message: `Synced ${result.synced} offline expense(s)`, type: 'success' });
+              // Refresh data after successful sync
+              await fetchData();
+              
+              // Check budget after sync
+              try {
+                const { getBudgetWarning } = await import('../../utils/budgetNotification');
+                const expenseList = await getMergedExpenses();
+                const warning = await getBudgetWarning(expenseList);
+                if (warning) {
+                  setTimeout(() => {
+                    showToast({
+                      message: warning,
+                      type: 'warning'
+                    });
+                  }, 1000);
+                }
+              } catch (e) {
+                console.log('Budget check failed:', e);
+              }
+            }
+            const newCount = await getPendingCount();
+            setPendingCount(newCount);
+          } catch (syncError: any) {
+            // Only show error if it's not a network issue
+            if (!syncError.message?.includes('Network') && !syncError.message?.includes('fetch')) {
+              console.log('Sync error:', syncError.message);
+            }
+          }
+        }
+        setSyncing(false);
+      }
+    } catch (e) {
+      console.error('Sync check failed:', e);
+      setSyncing(false);
+    }
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
+    await checkAndSyncPending();
     await fetchData();
     setRefreshing(false);
   };
@@ -203,16 +263,34 @@ export default function HomeScreen() {
               Your Wallet
             </Text>
           </View>
-          <TouchableOpacity
-            onPress={toggleTheme}
-            style={[styles.themeButton, { backgroundColor: theme.colors.surface }]}
-          >
-            <MaterialIcons
-              name={isDark ? 'light-mode' : 'dark-mode'}
-              size={22}
-              color={theme.colors.text}
-            />
-          </TouchableOpacity>
+          <View style={styles.headerButtons}>
+            {/* Sync indicator */}
+            {pendingCount > 0 && (
+              <TouchableOpacity
+                onPress={checkAndSyncPending}
+                style={[styles.syncButton, { backgroundColor: syncing ? theme.colors.warning + '20' : theme.colors.info + '20' }]}
+              >
+                <MaterialIcons
+                  name={syncing ? 'sync' : 'cloud-off'}
+                  size={20}
+                  color={syncing ? theme.colors.warning : theme.colors.info}
+                />
+                <Text style={[styles.syncText, { color: syncing ? theme.colors.warning : theme.colors.info }]}>
+                  {syncing ? 'Syncing...' : `${pendingCount}`}
+                </Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              onPress={toggleTheme}
+              style={[styles.themeButton, { backgroundColor: theme.colors.surface }]}
+            >
+              <MaterialIcons
+                name={isDark ? 'light-mode' : 'dark-mode'}
+                size={22}
+                color={theme.colors.text}
+              />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Total Spent Card - Clickable */}
@@ -388,7 +466,7 @@ export default function HomeScreen() {
 
         <View style={{ height: 100 }} />
       </ScrollView>
-    </SafeAreaView>
+    </SafeAreaView >
   );
 }
 
@@ -412,6 +490,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 10,
     paddingBottom: 24,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  syncButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    gap: 4,
+  },
+  syncText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   greeting: {
     fontSize: 15,

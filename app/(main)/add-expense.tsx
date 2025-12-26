@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     View,
     Text,
@@ -13,11 +13,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../../utils/ThemeContext';
 import { useToast } from '../../components/Toast';
 import api from '../../utils/api';
+import { saveOfflineExpense } from '../../utils/offlineSync';
+import { checkBudgetAfterExpense } from '../../utils/budgetNotification';
 
 const CATEGORIES = [
     { name: 'Food', icon: 'restaurant', color: '#F59E0B' },
@@ -64,6 +67,18 @@ export default function AddExpenseScreen() {
     const [calcDisplay, setCalcDisplay] = useState('0');
     const [currencySymbol, setCurrencySymbol] = useState('₹');
 
+    // Reset form when screen is focused (fresh form for new expense)
+    useFocusEffect(
+        useCallback(() => {
+            setAmount('');
+            setSelectedCategory(null);
+            setPaymentMethod('Cash');
+            setDescription('');
+            setExpenseDate(new Date());
+            setCalcDisplay('0');
+        }, [])
+    );
+
     // Open calculator with current amount pre-populated
     const openCalculator = () => {
         if (amount && parseFloat(amount) > 0) {
@@ -107,21 +122,76 @@ export default function AddExpenseScreen() {
                 return;
             }
 
-            const response: any = await api.createExpense(token, {
+            const expenseData = {
                 amount: parseFloat(amount),
                 category: selectedCategory,
                 paymentMethod,
                 description: description.trim() || undefined,
                 date: expenseDate.toISOString(),
-            });
+            };
 
-            if (response.success) {
-                router.back();
-            } else {
-                showToast({ message: response.message || 'Failed to save expense', type: 'error' });
+            // Try to save to server first
+            try {
+                const response: any = await api.createExpense(token, expenseData);
+
+                if (response.success) {
+                    showToast({ message: 'Expense added successfully', type: 'success' });
+                    
+                    // Check budget after adding expense
+                    try {
+                        const expensesRes: any = await api.getExpenses(token);
+                        if (expensesRes.success && Array.isArray(expensesRes.data)) {
+                            const { getBudgetWarning } = await import('../../utils/budgetNotification');
+                            const warning = await getBudgetWarning(expensesRes.data);
+                            if (warning) {
+                                setTimeout(() => {
+                                    showToast({
+                                        message: warning,
+                                        type: 'warning'
+                                    });
+                                }, 500);
+                            }
+                        }
+                    } catch (e) {
+                        // Budget check failed, continue anyway
+                        console.log('Budget check failed:', e);
+                    }
+                    router.back();
+                } else {
+                    showToast({ message: response.message || 'Failed to save expense', type: 'error' });
+                }
+            } catch (error: any) {
+                // Network error - save offline
+                if (error.message?.includes('Network') || error.message?.includes('fetch')) {
+                    await saveOfflineExpense(expenseData);
+                    showToast({ message: 'Expense added successfully', type: 'success' });
+                    
+                    // Still check budget with offline data
+                    try {
+                        const { getMergedExpenses } = await import('../../utils/offlineSync');
+                        const { getBudgetWarning } = await import('../../utils/budgetNotification');
+                        const allExpenses = await getMergedExpenses();
+                        const warning = await getBudgetWarning(allExpenses);
+                        if (warning) {
+                            setTimeout(() => {
+                                showToast({
+                                    message: warning,
+                                    type: 'warning'
+                                });
+                            }, 1000);
+                        }
+                    } catch (e) {
+                        console.log('Budget check failed:', e);
+                    }
+                    
+                    router.back();
+                } else {
+                    showToast({ message: 'Failed to save expense', type: 'error' });
+                }
             }
         } catch (error: any) {
-            showToast({ message: error.message || 'Failed to save expense', type: 'error' });
+            console.error('Failed to add expense:', error);
+            showToast({ message: 'Failed to save expense', type: 'error' });
         } finally {
             setLoading(false);
         }

@@ -4,7 +4,7 @@ A modern expense tracking mobile application built with React Native and Expo.
 
 ## Demo Video
 
-[Watch Demo on Google Drive](YOUR_GDRIVE_LINK_HERE)
+[Watch Demo Here](YOUR_GDRIVE_LINK_HERE)
 
 ---
 
@@ -23,26 +23,31 @@ A modern expense tracking mobile application built with React Native and Expo.
 ## Key Features
 
 ### Expense Management
+
 - Add expenses with amount, category, payment method, description, and date
 - Edit existing expenses
 - Delete expenses with confirmation
 - Built-in calculator for quick amount entry
 
 ### Categories
+
 - 10 predefined categories: Food, Transport, Shopping, Entertainment, Bills, Health, Education, Travel, Subscriptions, Other
 - Category-based filtering on expenses page
 - Visual icons and colors for each category
 
 ### Payment Methods
+
 - 6 payment options: Cash, UPI, Credit Card, Debit Card, Net Banking, Wallet
 - Filter expenses by payment method
 
 ### View Modes
+
 - Daily, Weekly, and Monthly expense views
 - Date/week/month navigation with arrows
 - Pull-to-refresh functionality
 
 ### Insights & Analytics
+
 - Pie chart visualization of spending by category
 - Category breakdown with percentages and progress bars
 - Historical trend bar charts (Last 7 days / 6 months / 3 years)
@@ -50,12 +55,27 @@ A modern expense tracking mobile application built with React Native and Expo.
 - Click on category to filter expenses
 
 ### Settings & Preferences
+
 - Multi-currency support (INR, USD, EUR, GBP, JPY)
 - Monthly budget setting
 - Carry-over budget toggle
 - Theme options: Light, Dark, System
 
+### Offline Support
+
+- Automatically saves expenses offline when network is unavailable
+- Auto-sync pending changes when connection is restored
+- Graceful error handling with informative messages
+- Works seamlessly without manual intervention
+
+### Budget Notifications
+
+- Alerts when exceeding monthly budget
+- Warning at 75% and 90% budget usage
+- Real-time budget tracking after each expense
+
 ### Authentication
+
 - User registration with name, email, password
 - Secure login with JWT tokens
 - Persistent sessions with AsyncStorage

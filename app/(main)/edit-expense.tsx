@@ -20,6 +20,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../../utils/ThemeContext';
 import { useToast } from '../../components/Toast';
 import api from '../../utils/api';
+import { savePendingDelete, savePendingUpdate, getCachedExpenses, cacheExpenses } from '../../utils/offlineSync';
 
 const CATEGORIES = [
     { name: 'Food', icon: 'restaurant', color: '#F59E0B' },
@@ -123,18 +124,47 @@ export default function EditExpenseScreen() {
             const token = await AsyncStorage.getItem('@auth_token');
             if (!token) return;
 
-            const response: any = await api.updateExpense(token, expenseId, {
+            const updateData = {
                 amount: parseFloat(amount),
                 category: selectedCategory,
                 paymentMethod,
                 description: description.trim() || undefined,
                 date: expenseDate.toISOString(),
-            });
+            };
 
-            if (response.success) {
-                router.back();
-            } else {
-                showToast({ message: response.message || 'Failed to update', type: 'error' });
+            try {
+                const response: any = await api.updateExpense(token, expenseId, updateData);
+
+                if (response.success) {
+                    // Update cache
+                    const cached = await getCachedExpenses();
+                    const updated = cached.map((e: any) => 
+                        e._id === expenseId ? { ...e, ...updateData } : e
+                    );
+                    await cacheExpenses(updated);
+                    
+                    showToast({ message: 'Expense updated', type: 'success' });
+                    router.back();
+                } else {
+                    showToast({ message: response.message || 'Failed to update', type: 'error' });
+                }
+            } catch (error: any) {
+                // Network error - save for offline sync
+                if (error.message?.includes('Network') || error.message?.includes('fetch')) {
+                    await savePendingUpdate(expenseId, updateData);
+                    
+                    // Update cache immediately
+                    const cached = await getCachedExpenses();
+                    const updated = cached.map((e: any) => 
+                        e._id === expenseId ? { ...e, ...updateData } : e
+                    );
+                    await cacheExpenses(updated);
+                    
+                    showToast({ message: 'Updated offline. Will sync when online.', type: 'info' });
+                    router.back();
+                } else {
+                    showToast({ message: error.message || 'Failed to update', type: 'error' });
+                }
             }
         } catch (error: any) {
             showToast({ message: error.message || 'Failed to update', type: 'error' });
@@ -152,8 +182,34 @@ export default function EditExpenseScreen() {
                     try {
                         const token = await AsyncStorage.getItem('@auth_token');
                         if (!token) return;
-                        await api.deleteExpense(token, expenseId);
-                        router.back();
+                        
+                        try {
+                            // Try to delete from server
+                            await api.deleteExpense(token, expenseId);
+                            
+                            // Update cache immediately
+                            const cached = await getCachedExpenses();
+                            const updated = cached.filter((e: any) => e._id !== expenseId);
+                            await cacheExpenses(updated);
+                            
+                            showToast({ message: 'Expense deleted', type: 'success' });
+                            router.back();
+                        } catch (error: any) {
+                            // Network error - save for offline sync
+                            if (error.message?.includes('Network') || error.message?.includes('fetch')) {
+                                await savePendingDelete(expenseId);
+                                
+                                // Remove from cache immediately
+                                const cached = await getCachedExpenses();
+                                const updated = cached.filter((e: any) => e._id !== expenseId);
+                                await cacheExpenses(updated);
+                                
+                                showToast({ message: 'Deleted offline. Will sync when online.', type: 'info' });
+                                router.back();
+                            } else {
+                                showToast({ message: 'Failed to delete expense', type: 'error' });
+                            }
+                        }
                     } catch (error) {
                         showToast({ message: 'Failed to delete expense', type: 'error' });
                     }

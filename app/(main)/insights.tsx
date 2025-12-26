@@ -14,6 +14,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../utils/ThemeContext';
 import api from '../../utils/api';
+import { cacheExpenses, getMergedExpenses } from '../../utils/offlineSync';
 
 const { width } = Dimensions.get('window');
 
@@ -66,17 +67,34 @@ export default function InsightsScreen() {
 
     const fetchExpenses = async () => {
         try {
+            setLoading(true);
             const token = await AsyncStorage.getItem('@auth_token');
             const userData = await AsyncStorage.getItem('@user');
-            if (!token) { setLoading(false); return; }
-            if (userData) setCurrencySymbol(JSON.parse(userData).currencySymbol || '₹');
-
-            const response: any = await api.getExpenses(token);
-            if (response.success && Array.isArray(response.data)) {
-                setExpenses(response.data);
+            
+            if (!token) {
+                setLoading(false);
+                return;
             }
-        } catch (error) {
-            console.error('Failed to fetch expenses:', error);
+            
+            if (userData) {
+                const user = JSON.parse(userData);
+                setCurrencySymbol(user.currencySymbol || '₹');
+            }
+
+            try {
+                const response: any = await api.getExpenses(token);
+                
+                if (response.success && Array.isArray(response.data)) {
+                    await cacheExpenses(response.data);
+                }
+            } catch (error: any) {
+                // Network error - will use cached + offline data
+                console.log('Network error, using cached data:', error.message);
+            }
+
+            // Always use merged data (cached + offline)
+            const merged = await getMergedExpenses();
+            setExpenses(merged);
         } finally {
             setLoading(false);
         }
