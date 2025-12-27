@@ -4,19 +4,26 @@ A modern expense tracking mobile application built with React Native and Expo.
 
 ## Demo Video
 
-[Watch Demo Here](https://drive.google.com/file/d/1RgumKYIjbVxXoOafJl5VI97pkexWm53D/view?usp=drivesdk)
+<a href="https://drive.google.com/file/d/1RgumKYIjbVxXoOafJl5VI97pkexWm53D/view?usp=drivesdk" target="_blank">Watch Demo Here</a>
 
 ---
 
 ## Screenshots
 
-|             Home              |               Expenses                |               Insights                |               Profile               |
-| :---------------------------: | :-----------------------------------: | :-----------------------------------: | :---------------------------------: |
-| ![Home](screenshots/home.jpg) | ![Expenses](screenshots/expenses.jpg) | ![Insights](screenshots/insights.jpg) | ![Profile](screenshots/profile.jpg) |
-
-|             Add Expense             |             Edit Expense              |              Login              |               Register                |
-| :---------------------------------: | :-----------------------------------: | :-----------------------------: | :-----------------------------------: |
-| ![Add](screenshots/add-expense.jpg) | ![Edit](screenshots/edit-expense.jpg) | ![Login](screenshots/login.jpg) | ![Register](screenshots/register.jpg) |
+<table>
+  <tr>
+    <td align="center"><img src="screenshots/home.jpg" width="180"/><br><b>Home</b></td>
+    <td align="center"><img src="screenshots/expenses.jpg" width="180"/><br><b>Expenses</b></td>
+    <td align="center"><img src="screenshots/insights.jpg" width="180"/><br><b>Insights</b></td>
+    <td align="center"><img src="screenshots/profile.jpg" width="180"/><br><b>Profile</b></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="screenshots/add-expense.jpg" width="180"/><br><b>Add Expense</b></td>
+    <td align="center"><img src="screenshots/edit-expense.jpg" width="180"/><br><b>Edit Expense</b></td>
+    <td align="center"><img src="screenshots/login.jpg" width="180"/><br><b>Login</b></td>
+    <td align="center"><img src="screenshots/register.jpg" width="180"/><br><b>Register</b></td>
+  </tr>
+</table>
 
 ---
 
