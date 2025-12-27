@@ -256,6 +256,39 @@ PORT=3000
 
 ---
 
+## Future Roadmap
+
+### v2.0 - Core Enhancements
+
+**Data Management**
+- Recurring expenses (auto-add monthly bills)
+- Export reports (CSV/PDF)
+- Cloud backup and restore
+
+**User Experience**
+- Custom categories
+- Search and filter expenses
+- Biometric app lock
+
+---
+
+### v3.0 - Advanced Features
+
+**Smart Features**
+- Receipt scanning with OCR
+- AI-powered spending insights
+
+**Collaboration**
+- Shared family accounts
+- Split expense tracking
+
+**Technical**
+- Push notifications
+- Home screen widgets
+- Comprehensive test coverage
+
+---
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

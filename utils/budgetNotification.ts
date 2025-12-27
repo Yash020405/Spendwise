@@ -9,6 +9,20 @@ interface BudgetStatus {
     warningLevel: 'safe' | 'warning' | 'danger' | 'exceeded';
 }
 
+// Get currency symbol from user data
+export const getCurrencySymbol = async (): Promise<string> => {
+    try {
+        const userData = await AsyncStorage.getItem('@user');
+        if (userData) {
+            const user = JSON.parse(userData);
+            return user.currencySymbol || '₹';
+        }
+    } catch (e) {
+        console.error('Failed to get currency symbol:', e);
+    }
+    return '₹';
+};
+
 // Get monthly budget from user data
 export const getMonthlyBudget = async (): Promise<number> => {
     try {
@@ -65,23 +79,24 @@ export const getBudgetStatus = async (expenses: any[]): Promise<BudgetStatus> =>
 // Get budget warning message based on current spending
 export const getBudgetWarning = async (expenses: any[]): Promise<string | null> => {
     const budget = await getMonthlyBudget();
-    
+
     if (budget <= 0) {
         return null;
     }
-    
+
+    const currencySymbol = await getCurrencySymbol();
     const spent = calculateMonthlySpending(expenses);
     const percent = (spent / budget) * 100;
 
     if (spent > budget) {
         const overBy = spent - budget;
-        return `Budget Exceeded: You are over by ₹${overBy.toFixed(0)}`;
+        return `Budget Exceeded: You are over by ${currencySymbol}${overBy.toFixed(0)}`;
     } else if (percent >= 90) {
         return `Budget Alert: You have used ${percent.toFixed(0)}% of your monthly budget`;
     } else if (percent >= 75) {
         return `Budget Notice: You have used ${percent.toFixed(0)}% of your monthly budget`;
     }
-    
+
     return null;
 };
 
@@ -96,14 +111,15 @@ export const checkBudgetAfterExpense = async (
     message: string | null;
 }> => {
     const budget = await getMonthlyBudget();
-    
+
     if (budget <= 0) {
         return { willExceed: false, newTotal: 0, budget: 0, message: null };
     }
-    
+
+    const currencySymbol = await getCurrencySymbol();
     const currentSpent = calculateMonthlySpending(currentExpenses);
     const newTotal = currentSpent + newExpenseAmount;
-    
+
     const percentAfter = (newTotal / budget) * 100;
     const percentBefore = (currentSpent / budget) * 100;
 
@@ -112,12 +128,12 @@ export const checkBudgetAfterExpense = async (
     // Check if we just exceeded the budget
     if (newTotal > budget && currentSpent <= budget) {
         const overBy = newTotal - budget;
-        message = `Budget Exceeded: You are now over by ₹${overBy.toFixed(0)}`;
-    } 
+        message = `Budget Exceeded: You are now over by ${currencySymbol}${overBy.toFixed(0)}`;
+    }
     // Check if we crossed 90% threshold
     else if (percentAfter >= 90 && percentBefore < 90) {
         message = `Budget Alert: You have used ${percentAfter.toFixed(0)}% of your monthly budget`;
-    } 
+    }
     // Check if we crossed 75% threshold
     else if (percentAfter >= 75 && percentBefore < 75) {
         message = `Budget Notice: You have used ${percentAfter.toFixed(0)}% of your monthly budget`;
@@ -125,7 +141,7 @@ export const checkBudgetAfterExpense = async (
     // If already over budget, show how much over
     else if (newTotal > budget) {
         const overBy = newTotal - budget;
-        message = `Over Budget: ₹${overBy.toFixed(0)}`;
+        message = `Over Budget: ${currencySymbol}${overBy.toFixed(0)}`;
     }
 
     return {

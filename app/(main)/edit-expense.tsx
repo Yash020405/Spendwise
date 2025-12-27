@@ -95,19 +95,48 @@ export default function EditExpenseScreen() {
                 return;
             }
 
-            const response: any = await api.getExpenses(token);
-            if (response.success && Array.isArray(response.data)) {
-                const expense = response.data.find((e: any) => e._id === expenseId);
-                if (expense) {
-                    setAmount(String(expense.amount));
-                    setSelectedCategory(expense.category);
-                    setPaymentMethod(expense.paymentMethod || 'Cash');
-                    setDescription(expense.description || '');
-                    setExpenseDate(new Date(expense.date));
+            let expenses: any[] = [];
+
+            try {
+                // Try to fetch from API first
+                const response: any = await api.getExpenses(token);
+                if (response.success && Array.isArray(response.data)) {
+                    await cacheExpenses(response.data);
+                    expenses = response.data;
                 }
+            } catch (error) {
+                // Network error - use merged offline data
+                console.log('Offline mode - loading from cache');
+            }
+
+            // Always use merged expenses to include offline ones
+            const { getMergedExpenses } = await import('../../utils/offlineSync');
+            const mergedExpenses = await getMergedExpenses();
+
+            // Combine: if online fetch succeeded, merge with any pending offline; otherwise use merged
+            if (expenses.length === 0) {
+                expenses = mergedExpenses;
+            }
+
+            // Find expense by _id (server) or by offline_id format
+            const expense = expenses.find((e: any) =>
+                e._id === expenseId ||
+                e.id === expenseId
+            );
+
+            if (expense) {
+                setAmount(String(expense.amount));
+                setSelectedCategory(expense.category);
+                setPaymentMethod(expense.paymentMethod || 'Cash');
+                setDescription(expense.description || '');
+                setExpenseDate(new Date(expense.date));
+            } else {
+                showToast({ message: 'Expense not found', type: 'error' });
+                router.back();
             }
         } catch (error) {
             console.error('Failed to load expense:', error);
+            showToast({ message: 'Failed to load expense', type: 'error' });
         } finally {
             setLoading(false);
         }
@@ -138,11 +167,11 @@ export default function EditExpenseScreen() {
                 if (response.success) {
                     // Update cache
                     const cached = await getCachedExpenses();
-                    const updated = cached.map((e: any) => 
+                    const updated = cached.map((e: any) =>
                         e._id === expenseId ? { ...e, ...updateData } : e
                     );
                     await cacheExpenses(updated);
-                    
+
                     showToast({ message: 'Expense updated', type: 'success' });
                     router.back();
                 } else {
@@ -152,14 +181,14 @@ export default function EditExpenseScreen() {
                 // Network error - save for offline sync
                 if (error.message?.includes('Network') || error.message?.includes('fetch')) {
                     await savePendingUpdate(expenseId, updateData);
-                    
+
                     // Update cache immediately
                     const cached = await getCachedExpenses();
-                    const updated = cached.map((e: any) => 
+                    const updated = cached.map((e: any) =>
                         e._id === expenseId ? { ...e, ...updateData } : e
                     );
                     await cacheExpenses(updated);
-                    
+
                     showToast({ message: 'Updated offline. Will sync when online.', type: 'info' });
                     router.back();
                 } else {
@@ -182,28 +211,28 @@ export default function EditExpenseScreen() {
                     try {
                         const token = await AsyncStorage.getItem('@auth_token');
                         if (!token) return;
-                        
+
                         try {
                             // Try to delete from server
                             await api.deleteExpense(token, expenseId);
-                            
+
                             // Update cache immediately
                             const cached = await getCachedExpenses();
                             const updated = cached.filter((e: any) => e._id !== expenseId);
                             await cacheExpenses(updated);
-                            
+
                             showToast({ message: 'Expense deleted', type: 'success' });
                             router.back();
                         } catch (error: any) {
                             // Network error - save for offline sync
                             if (error.message?.includes('Network') || error.message?.includes('fetch')) {
                                 await savePendingDelete(expenseId);
-                                
+
                                 // Remove from cache immediately
                                 const cached = await getCachedExpenses();
                                 const updated = cached.filter((e: any) => e._id !== expenseId);
                                 await cacheExpenses(updated);
-                                
+
                                 showToast({ message: 'Deleted offline. Will sync when online.', type: 'info' });
                                 router.back();
                             } else {

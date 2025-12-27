@@ -1,6 +1,10 @@
 // Theme configuration for PocketExpense+
+import { TextStyle } from 'react-native';
+
+type FontWeight = TextStyle['fontWeight'];
+
 export const lightTheme = {
-    name: 'light',
+    name: 'light' as const,
     colors: {
         // Primary colors
         primary: '#6366F1',
@@ -63,14 +67,14 @@ export const lightTheme = {
         full: 9999,
     },
     typography: {
-        h1: { fontSize: 32, fontWeight: '700', lineHeight: 40 },
-        h2: { fontSize: 24, fontWeight: '700', lineHeight: 32 },
-        h3: { fontSize: 20, fontWeight: '600', lineHeight: 28 },
-        h4: { fontSize: 18, fontWeight: '600', lineHeight: 24 },
-        body: { fontSize: 16, fontWeight: '400', lineHeight: 24 },
-        bodySmall: { fontSize: 14, fontWeight: '400', lineHeight: 20 },
-        caption: { fontSize: 12, fontWeight: '400', lineHeight: 16 },
-        button: { fontSize: 16, fontWeight: '600', lineHeight: 24 },
+        h1: { fontSize: 32, fontWeight: '700' as FontWeight, lineHeight: 40 },
+        h2: { fontSize: 24, fontWeight: '700' as FontWeight, lineHeight: 32 },
+        h3: { fontSize: 20, fontWeight: '600' as FontWeight, lineHeight: 28 },
+        h4: { fontSize: 18, fontWeight: '600' as FontWeight, lineHeight: 24 },
+        body: { fontSize: 16, fontWeight: '400' as FontWeight, lineHeight: 24 },
+        bodySmall: { fontSize: 14, fontWeight: '400' as FontWeight, lineHeight: 20 },
+        caption: { fontSize: 12, fontWeight: '400' as FontWeight, lineHeight: 16 },
+        button: { fontSize: 16, fontWeight: '600' as FontWeight, lineHeight: 24 },
     },
     shadows: {
         sm: {
@@ -99,7 +103,7 @@ export const lightTheme = {
 
 export const darkTheme = {
     ...lightTheme,
-    name: 'dark',
+    name: 'dark' as const,
     colors: {
         // Primary colors (same)
         primary: '#818CF8',
@@ -148,4 +152,4 @@ export const darkTheme = {
     },
 };
 
-export type Theme = typeof lightTheme;
+export type Theme = Omit<typeof lightTheme, 'name'> & { name: 'light' | 'dark' };

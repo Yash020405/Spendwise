@@ -55,12 +55,12 @@ export default function RegisterScreen() {
 
         setLoading(true);
         try {
-            const response: any = await api.signup({
-                name: name.trim(),
-                email: email.trim().toLowerCase(),
+            const response: any = await api.signup(
+                name.trim(),
+                email.trim().toLowerCase(),
                 password,
-                currency: selectedCurrency,
-            });
+                selectedCurrency
+            );
 
             if (response.success) {
                 await AsyncStorage.setItem('@auth_token', response.data.token);
@@ -135,7 +135,7 @@ export default function RegisterScreen() {
                             onChangeText={setPassword}
                             leftIcon="lock"
                             error={errors.password}
-                            isPassword
+                            secureTextEntry
                         />
 
                         <Input
@@ -145,7 +145,7 @@ export default function RegisterScreen() {
                             onChangeText={setConfirmPassword}
                             leftIcon="lock-outline"
                             error={errors.confirmPassword}
-                            isPassword
+                            secureTextEntry
                         />
 
                         {/* Currency Selection */}
