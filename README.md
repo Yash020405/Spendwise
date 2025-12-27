@@ -4,7 +4,7 @@ A modern expense tracking mobile application built with React Native and Expo.
 
 ## Demo Video
 
-[Watch Demo Here](YOUR_GDRIVE_LINK_HERE)
+[Watch Demo Here](https://drive.google.com/file/d/1RgumKYIjbVxXoOafJl5VI97pkexWm53D/view?usp=drivesdk)
 
 ---
 
@@ -12,11 +12,11 @@ A modern expense tracking mobile application built with React Native and Expo.
 
 |             Home              |               Expenses                |               Insights                |               Profile               |
 | :---------------------------: | :-----------------------------------: | :-----------------------------------: | :---------------------------------: |
-| ![Home](screenshots/home.png) | ![Expenses](screenshots/expenses.png) | ![Insights](screenshots/insights.png) | ![Profile](screenshots/profile.png) |
+| ![Home](screenshots/home.jpg) | ![Expenses](screenshots/expenses.jpg) | ![Insights](screenshots/insights.jpg) | ![Profile](screenshots/profile.jpg) |
 
 |             Add Expense             |             Edit Expense              |              Login              |               Register                |
 | :---------------------------------: | :-----------------------------------: | :-----------------------------: | :-----------------------------------: |
-| ![Add](screenshots/add-expense.png) | ![Edit](screenshots/edit-expense.png) | ![Login](screenshots/login.png) | ![Register](screenshots/register.png) |
+| ![Add](screenshots/add-expense.jpg) | ![Edit](screenshots/edit-expense.jpg) | ![Login](screenshots/login.jpg) | ![Register](screenshots/register.jpg) |
 
 ---
 

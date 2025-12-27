@@ -20,7 +20,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../../utils/ThemeContext';
 import { useToast } from '../../components/Toast';
 import api from '../../utils/api';
-import { savePendingDelete, savePendingUpdate, getCachedExpenses, cacheExpenses } from '../../utils/offlineSync';
+import { savePendingDelete, savePendingUpdate, getCachedExpenses, cacheExpenses, getMergedExpenses } from '../../utils/offlineSync';
 
 const CATEGORIES = [
     { name: 'Food', icon: 'restaurant', color: '#F59E0B' },
@@ -110,7 +110,6 @@ export default function EditExpenseScreen() {
             }
 
             // Always use merged expenses to include offline ones
-            const { getMergedExpenses } = await import('../../utils/offlineSync');
             const mergedExpenses = await getMergedExpenses();
 
             // Combine: if online fetch succeeded, merge with any pending offline; otherwise use merged

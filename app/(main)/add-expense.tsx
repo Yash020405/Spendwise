@@ -19,8 +19,8 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../../utils/ThemeContext';
 import { useToast } from '../../components/Toast';
 import api from '../../utils/api';
-import { saveOfflineExpense } from '../../utils/offlineSync';
-import { checkBudgetAfterExpense } from '../../utils/budgetNotification';
+import { saveOfflineExpense, getMergedExpenses } from '../../utils/offlineSync';
+import { checkBudgetAfterExpense, getBudgetWarning } from '../../utils/budgetNotification';
 
 const CATEGORIES = [
     { name: 'Food', icon: 'restaurant', color: '#F59E0B' },
@@ -136,12 +136,11 @@ export default function AddExpenseScreen() {
 
                 if (response.success) {
                     showToast({ message: 'Expense added successfully', type: 'success' });
-                    
+
                     // Check budget after adding expense
                     try {
                         const expensesRes: any = await api.getExpenses(token);
                         if (expensesRes.success && Array.isArray(expensesRes.data)) {
-                            const { getBudgetWarning } = await import('../../utils/budgetNotification');
                             const warning = await getBudgetWarning(expensesRes.data);
                             if (warning) {
                                 setTimeout(() => {
@@ -165,11 +164,9 @@ export default function AddExpenseScreen() {
                 if (error.message?.includes('Network') || error.message?.includes('fetch')) {
                     await saveOfflineExpense(expenseData);
                     showToast({ message: 'Expense added successfully', type: 'success' });
-                    
+
                     // Still check budget with offline data
                     try {
-                        const { getMergedExpenses } = await import('../../utils/offlineSync');
-                        const { getBudgetWarning } = await import('../../utils/budgetNotification');
                         const allExpenses = await getMergedExpenses();
                         const warning = await getBudgetWarning(allExpenses);
                         if (warning) {
@@ -183,7 +180,7 @@ export default function AddExpenseScreen() {
                     } catch (e) {
                         console.log('Budget check failed:', e);
                     }
-                    
+
                     router.back();
                 } else {
                     showToast({ message: 'Failed to save expense', type: 'error' });
