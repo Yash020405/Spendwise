@@ -18,6 +18,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../../utils/ThemeContext';
 import { useToast } from '../../components/Toast';
+import SplitModal from '../../components/SplitModal';
 import api from '../../utils/api';
 import { saveOfflineExpense, getMergedExpenses } from '../../utils/offlineSync';
 import { checkBudgetAfterExpense, getBudgetWarning } from '../../utils/budgetNotification';
@@ -66,6 +67,15 @@ export default function AddExpenseScreen() {
     const [showCalculator, setShowCalculator] = useState(false);
     const [calcDisplay, setCalcDisplay] = useState('0');
     const [currencySymbol, setCurrencySymbol] = useState('₹');
+    // Split expense state
+    const [showSplitModal, setShowSplitModal] = useState(false);
+    const [isSplit, setIsSplit] = useState(false);
+    const [splitType, setSplitType] = useState<'equal' | 'custom' | 'percentage'>('equal');
+    const [participants, setParticipants] = useState<any[]>([]);
+    const [userShare, setUserShare] = useState(0);
+    // Recurring expense state
+    const [isRecurring, setIsRecurring] = useState(false);
+    const [recurringFrequency, setRecurringFrequency] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly');
 
     // Reset form when screen is focused (fresh form for new expense)
     useFocusEffect(
@@ -76,6 +86,13 @@ export default function AddExpenseScreen() {
             setDescription('');
             setExpenseDate(new Date());
             setCalcDisplay('0');
+            // Reset split state
+            setIsSplit(false);
+            setParticipants([]);
+            setUserShare(0);
+            // Reset recurring state
+            setIsRecurring(false);
+            setRecurringFrequency('monthly');
         }, [])
     );
 
@@ -128,6 +145,11 @@ export default function AddExpenseScreen() {
                 paymentMethod,
                 description: description.trim() || undefined,
                 date: expenseDate.toISOString(),
+                // Split expense data
+                isSplit,
+                splitType: isSplit ? splitType : undefined,
+                participants: isSplit ? participants : undefined,
+                userShare: isSplit ? userShare : undefined,
             };
 
             // Try to save to server first
@@ -135,7 +157,25 @@ export default function AddExpenseScreen() {
                 const response: any = await api.createExpense(token, expenseData);
 
                 if (response.success) {
-                    showToast({ message: 'Expense added successfully', type: 'success' });
+                    // If recurring is enabled, also create a recurring template
+                    if (isRecurring) {
+                        try {
+                            await api.createRecurring(token, {
+                                type: 'expense',
+                                amount: parseFloat(amount),
+                                category: selectedCategory,
+                                paymentMethod,
+                                description: description.trim() || undefined,
+                                frequency: recurringFrequency,
+                                dayOfMonth: recurringFrequency === 'monthly' ? expenseDate.getDate() : undefined,
+                            });
+                            showToast({ message: 'Expense added + recurring set up!', type: 'success' });
+                        } catch (e) {
+                            showToast({ message: 'Expense added, but recurring setup failed', type: 'warning' });
+                        }
+                    } else {
+                        showToast({ message: 'Expense added successfully', type: 'success' });
+                    }
 
                     // Check budget after adding expense
                     try {
@@ -364,6 +404,99 @@ export default function AddExpenseScreen() {
                         placeholderTextColor={theme.colors.textTertiary}
                         multiline
                     />
+
+                    {/* Split Expense Button */}
+                    <Text style={[styles.label, { color: theme.colors.textSecondary }]}>Split Expense</Text>
+                    <TouchableOpacity
+                        style={[
+                            styles.splitButton,
+                            { backgroundColor: theme.colors.surface },
+                            isSplit && { backgroundColor: theme.colors.primary + '20', borderColor: theme.colors.primary, borderWidth: 1 }
+                        ]}
+                        onPress={() => setShowSplitModal(true)}
+                        disabled={!amount || parseFloat(amount) <= 0}
+                    >
+                        <View style={styles.splitButtonContent}>
+                            <MaterialIcons
+                                name="group"
+                                size={22}
+                                color={isSplit ? theme.colors.primary : theme.colors.textSecondary}
+                            />
+                            <View style={styles.splitButtonText}>
+                                <Text style={[styles.splitTitle, { color: isSplit ? theme.colors.primary : theme.colors.text }]}>
+                                    {isSplit ? `Split with ${participants.length} people` : 'Split this expense'}
+                                </Text>
+                                {isSplit && userShare > 0 && (
+                                    <Text style={[styles.splitSubtitle, { color: theme.colors.textSecondary }]}>
+                                        Your share: {currencySymbol}{userShare.toLocaleString()}
+                                    </Text>
+                                )}
+                            </View>
+                        </View>
+                        <MaterialIcons
+                            name={isSplit ? 'edit' : 'chevron-right'}
+                            size={22}
+                            color={isSplit ? theme.colors.primary : theme.colors.textTertiary}
+                        />
+                    </TouchableOpacity>
+
+                    {/* Recurring Toggle */}
+                    <Text style={[styles.label, { color: theme.colors.textSecondary }]}>Make Recurring</Text>
+                    <TouchableOpacity
+                        style={[
+                            styles.splitButton,
+                            { backgroundColor: theme.colors.surface },
+                            isRecurring && { backgroundColor: '#8B5CF620', borderColor: '#8B5CF6', borderWidth: 1 }
+                        ]}
+                        onPress={() => setIsRecurring(!isRecurring)}
+                    >
+                        <View style={styles.splitButtonContent}>
+                            <MaterialIcons
+                                name="repeat"
+                                size={22}
+                                color={isRecurring ? '#8B5CF6' : theme.colors.textSecondary}
+                            />
+                            <View style={styles.splitButtonText}>
+                                <Text style={[styles.splitTitle, { color: isRecurring ? '#8B5CF6' : theme.colors.text }]}>
+                                    {isRecurring ? 'Repeating expense' : 'One-time expense'}
+                                </Text>
+                                {isRecurring && (
+                                    <Text style={[styles.splitSubtitle, { color: theme.colors.textSecondary }]}>
+                                        Repeats {recurringFrequency}
+                                    </Text>
+                                )}
+                            </View>
+                        </View>
+                        <MaterialIcons
+                            name={isRecurring ? 'check-circle' : 'radio-button-unchecked'}
+                            size={22}
+                            color={isRecurring ? '#8B5CF6' : theme.colors.textTertiary}
+                        />
+                    </TouchableOpacity>
+
+                    {/* Frequency Selector (when recurring is enabled) */}
+                    {isRecurring && (
+                        <View style={styles.frequencyRow}>
+                            {(['daily', 'weekly', 'monthly', 'yearly'] as const).map((freq) => (
+                                <TouchableOpacity
+                                    key={freq}
+                                    style={[
+                                        styles.frequencyBtn,
+                                        { backgroundColor: theme.colors.surface },
+                                        recurringFrequency === freq && { backgroundColor: '#8B5CF6' }
+                                    ]}
+                                    onPress={() => setRecurringFrequency(freq)}
+                                >
+                                    <Text style={[
+                                        styles.frequencyText,
+                                        { color: recurringFrequency === freq ? '#FFF' : theme.colors.text }
+                                    ]}>
+                                        {freq.charAt(0).toUpperCase() + freq.slice(1)}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    )}
                 </ScrollView>
 
                 {/* Save Button */}
@@ -376,6 +509,20 @@ export default function AddExpenseScreen() {
                         <Text style={styles.saveBtnText}>{loading ? 'Saving...' : `Save ${amount ? currencySymbol + amount : ''}`}</Text>
                     </TouchableOpacity>
                 </View>
+
+                {/* Split Modal */}
+                <SplitModal
+                    visible={showSplitModal}
+                    onClose={() => setShowSplitModal(false)}
+                    totalAmount={parseFloat(amount) || 0}
+                    currencySymbol={currencySymbol}
+                    onSave={(newParticipants, newSplitType, newUserShare) => {
+                        setIsSplit(newParticipants.length > 0);
+                        setParticipants(newParticipants);
+                        setSplitType(newSplitType);
+                        setUserShare(newUserShare);
+                    }}
+                />
 
                 {/* Native Date Picker */}
                 {showDatePicker && (
@@ -561,4 +708,14 @@ const styles = StyleSheet.create({
     calcApplyText: { color: '#FFF', fontSize: 17, fontWeight: '600' },
     calcHint: { flexDirection: 'row', alignItems: 'center', padding: 10, paddingHorizontal: 14, borderRadius: 20, marginTop: 12, gap: 6 },
     calcHintText: { fontSize: 13, fontWeight: '500' },
+    // Split button styles
+    splitButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 14, borderRadius: 12, marginBottom: 16 },
+    splitButtonContent: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    splitButtonText: { gap: 2 },
+    splitTitle: { fontSize: 15, fontWeight: '500' },
+    splitSubtitle: { fontSize: 12 },
+    // Recurring frequency styles
+    frequencyRow: { flexDirection: 'row', gap: 8, marginBottom: 16, marginTop: -8 },
+    frequencyBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
+    frequencyText: { fontSize: 12, fontWeight: '600' },
 });

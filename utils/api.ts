@@ -1,5 +1,20 @@
-// API Configuration
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
+// API Configuration - Auto-detect the correct URL
+import Constants from 'expo-constants';
+
+const getApiUrl = () => {
+    // Auto-detect from Expo dev server FIRST
+    const debuggerHost = Constants.expoConfig?.hostUri || Constants.manifest?.debuggerHost;
+    if (debuggerHost) {
+        const host = debuggerHost.split(':')[0];
+        return `http://${host}:3000/api`;
+    }
+
+    // Fallback to env or localhost
+    return process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
+};
+
+const API_BASE_URL = getApiUrl();
+console.log('[API] Using URL:', API_BASE_URL);
 
 interface RequestConfig {
     method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -156,6 +171,21 @@ class ApiService {
         });
     }
 
+    async updateCategory(token: string, id: string, category: { name?: string; icon?: string; color?: string }) {
+        return this.request(`/categories/${id}`, {
+            method: 'PUT',
+            token,
+            body: category,
+        });
+    }
+
+    async deleteCategory(token: string, id: string) {
+        return this.request(`/categories/${id}`, {
+            method: 'DELETE',
+            token,
+        });
+    }
+
     async getCategoryIcons() {
         return this.request('/categories/icons');
     }
@@ -183,6 +213,150 @@ class ApiService {
         if (year) params.append('year', year.toString());
         const query = params.toString() ? `?${params.toString()}` : '';
         return this.request(`/budgets/status${query}`, { token });
+    }
+
+    // Income endpoints
+    async getIncomeSources(token: string) {
+        return this.request('/income/sources', { token });
+    }
+
+    async getIncome(token: string, params?: { startDate?: string; endDate?: string; source?: string }) {
+        let query = '';
+        if (params) {
+            const searchParams = new URLSearchParams();
+            if (params.startDate) searchParams.append('startDate', params.startDate);
+            if (params.endDate) searchParams.append('endDate', params.endDate);
+            if (params.source) searchParams.append('source', params.source);
+            query = `?${searchParams.toString()}`;
+        }
+        return this.request(`/income${query}`, { token });
+    }
+
+    async createIncome(token: string, income: { amount: number; source: string; description?: string; date?: string }) {
+        return this.request('/income', {
+            method: 'POST',
+            token,
+            body: income,
+        });
+    }
+
+    async updateIncome(token: string, id: string, income: any) {
+        return this.request(`/income/${id}`, {
+            method: 'PUT',
+            token,
+            body: income,
+        });
+    }
+
+    async deleteIncome(token: string, id: string) {
+        return this.request(`/income/${id}`, {
+            method: 'DELETE',
+            token,
+        });
+    }
+
+    async getIncomeSummary(token: string, month?: number, year?: number) {
+        const params = new URLSearchParams();
+        if (month) params.append('month', month.toString());
+        if (year) params.append('year', year.toString());
+        const query = params.toString() ? `?${params.toString()}` : '';
+        return this.request(`/income/summary/monthly${query}`, { token });
+    }
+
+    async getBalance(token: string, params?: { month?: number; year?: number; startDate?: string; endDate?: string }) {
+        const searchParams = new URLSearchParams();
+        if (params?.month) searchParams.append('month', params.month.toString());
+        if (params?.year) searchParams.append('year', params.year.toString());
+        if (params?.startDate) searchParams.append('startDate', params.startDate);
+        if (params?.endDate) searchParams.append('endDate', params.endDate);
+        const query = searchParams.toString() ? `?${searchParams.toString()}` : '';
+        return this.request(`/income/balance${query}`, { token });
+    }
+
+    // Recurring transaction endpoints
+    async getRecurring(token: string, params?: { type?: string; isActive?: boolean }) {
+        const searchParams = new URLSearchParams();
+        if (params?.type) searchParams.append('type', params.type);
+        if (params?.isActive !== undefined) searchParams.append('isActive', params.isActive.toString());
+        const query = searchParams.toString() ? `?${searchParams.toString()}` : '';
+        return this.request(`/recurring${query}`, { token });
+    }
+
+    async createRecurring(token: string, recurring: {
+        type: 'expense' | 'income';
+        amount: number;
+        category?: string;
+        source?: string;
+        paymentMethod?: string;
+        description?: string;
+        frequency: 'daily' | 'weekly' | 'monthly' | 'yearly';
+        dayOfMonth?: number;
+        startDate?: string;
+        endDate?: string;
+    }) {
+        return this.request('/recurring', {
+            method: 'POST',
+            token,
+            body: recurring,
+        });
+    }
+
+    async updateRecurring(token: string, id: string, recurring: any) {
+        return this.request(`/recurring/${id}`, {
+            method: 'PUT',
+            token,
+            body: recurring,
+        });
+    }
+
+    async deleteRecurring(token: string, id: string) {
+        return this.request(`/recurring/${id}`, {
+            method: 'DELETE',
+            token,
+        });
+    }
+
+    async toggleRecurring(token: string, id: string) {
+        return this.request(`/recurring/${id}/toggle`, {
+            method: 'POST',
+            token,
+        });
+    }
+
+    async generateRecurring(token: string, id: string) {
+        return this.request(`/recurring/${id}/generate`, {
+            method: 'POST',
+            token,
+        });
+    }
+
+    async processRecurring(token: string) {
+        return this.request('/recurring/process', {
+            method: 'POST',
+            token,
+        });
+    }
+
+    // AI Insights endpoints
+    async getAIInsights(token: string, timeRange: 'week' | 'month' | 'year' = 'month', month?: number, year?: number) {
+        return this.request('/ai/insights', {
+            method: 'POST',
+            token,
+            body: { timeRange, month, year },
+        });
+    }
+
+    // Split expense endpoints
+    async updateParticipantPayment(token: string, expenseId: string, participantId: string, data: { isPaid: boolean; paidAmount?: number }) {
+        return this.request(`/expenses/${expenseId}/participants/${participantId}/payment`, {
+            method: 'PUT',
+            token,
+            body: data,
+        });
+    }
+
+    async getSplitBalances(token: string) {
+        return this.request('/expenses/split/balances', { token });
     }
 }
 

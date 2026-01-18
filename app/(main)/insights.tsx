@@ -15,6 +15,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../utils/ThemeContext';
 import api from '../../utils/api';
 import { cacheExpenses, getMergedExpenses } from '../../utils/offlineSync';
+import SmartInsightsCard from '../../components/SmartInsightsCard';
 
 const { width } = Dimensions.get('window');
 
@@ -33,6 +34,14 @@ interface Expense {
     _id: string;
     amount: number;
     category: string;
+    date: string;
+}
+
+interface Income {
+    _id: string;
+    amount: number;
+    source: string;
+    description?: string;
     date: string;
 }
 
@@ -57,7 +66,9 @@ export default function InsightsScreen() {
     const [currencySymbol, setCurrencySymbol] = useState('₹');
     const [viewMode, setViewMode] = useState<ViewMode>('breakdown');
     const [compareMode, setCompareMode] = useState<CompareMode>('months');
+    const [transactionType, setTransactionType] = useState<'expense' | 'income'>('expense');
     const [selectedMonth, setSelectedMonth] = useState(new Date());
+    const [incomeList, setIncomeList] = useState<Income[]>([]);
     const [comparePeriod1, setComparePeriod1] = useState<Date>(new Date());
     const [comparePeriod2, setComparePeriod2] = useState<Date>(() => {
         const d = new Date();
@@ -70,29 +81,34 @@ export default function InsightsScreen() {
             setLoading(true);
             const token = await AsyncStorage.getItem('@auth_token');
             const userData = await AsyncStorage.getItem('@user');
-            
+
             if (!token) {
                 setLoading(false);
                 return;
             }
-            
+
             if (userData) {
                 const user = JSON.parse(userData);
                 setCurrencySymbol(user.currencySymbol || '₹');
             }
 
             try {
-                const response: any = await api.getExpenses(token);
-                
-                if (response.success && Array.isArray(response.data)) {
-                    await cacheExpenses(response.data);
+                const [expResponse, incResponse]: any = await Promise.all([
+                    api.getExpenses(token),
+                    api.getIncome(token)
+                ]);
+
+                if (expResponse.success && Array.isArray(expResponse.data)) {
+                    await cacheExpenses(expResponse.data);
+                }
+                if (incResponse.success && Array.isArray(incResponse.data)) {
+                    setIncomeList(incResponse.data);
                 }
             } catch (error: any) {
-                // Network error - will use cached + offline data
-                console.log('Network error, using cached data:', error.message);
+                console.log('Error fetching data:', error.message);
             }
 
-            // Always use merged data (cached + offline)
+            // Always use merged data (cached + offline) for expenses
             const merged = await getMergedExpenses();
             setExpenses(merged);
         } finally {
@@ -108,36 +124,43 @@ export default function InsightsScreen() {
         setRefreshing(false);
     };
 
-    const monthlyExpenses = useMemo(() => {
+    const monthlyData = useMemo(() => {
         const year = selectedMonth.getFullYear();
         const month = selectedMonth.getMonth();
-        return expenses.filter(e => {
+        const currentExpenses = expenses.filter(e => {
             const d = new Date(e.date);
             return d.getFullYear() === year && d.getMonth() === month;
         });
-    }, [expenses, selectedMonth]);
+        const currentIncome = incomeList.filter(i => {
+            const d = new Date(i.date);
+            return d.getFullYear() === year && d.getMonth() === month;
+        });
+        return { expenses: currentExpenses, income: currentIncome };
+    }, [expenses, incomeList, selectedMonth]);
+
+    const activeData = transactionType === 'expense' ? monthlyData.expenses : monthlyData.income;
 
     const categoryData: CategoryData[] = useMemo(() => {
         const map = new Map<string, { total: number; count: number }>();
         let total = 0;
-        monthlyExpenses.forEach(e => {
-            const cat = e.category || 'Other';
+        activeData.forEach((item: any) => {
+            const cat = transactionType === 'expense' ? (item.category || 'Other') : (item.source || 'Other');
             const existing = map.get(cat) || { total: 0, count: 0 };
-            map.set(cat, { total: existing.total + e.amount, count: existing.count + 1 });
-            total += e.amount;
+            map.set(cat, { total: existing.total + item.amount, count: existing.count + 1 });
+            total += item.amount;
         });
         return Array.from(map.entries())
             .map(([name, data]) => ({
                 name,
                 ...data,
                 percentage: total > 0 ? (data.total / total) * 100 : 0,
-                color: CATEGORY_CONFIG[name]?.color || '#6B7280',
-                icon: CATEGORY_CONFIG[name]?.icon || 'more-horiz',
+                color: transactionType === 'expense' ? (CATEGORY_CONFIG[name]?.color || '#6B7280') : '#10B981',
+                icon: transactionType === 'expense' ? (CATEGORY_CONFIG[name]?.icon || 'more-horiz') : 'trending-up',
             }))
             .sort((a, b) => b.total - a.total);
-    }, [monthlyExpenses]);
+    }, [activeData, transactionType]);
 
-    const totalSpent = categoryData.reduce((sum, c) => sum + c.total, 0);
+    const totalInPeriod = categoryData.reduce((sum, c) => sum + c.total, 0);
 
     // Get historical data for trends
     const getHistoricalData = (mode: CompareMode) => {
@@ -263,7 +286,7 @@ export default function InsightsScreen() {
                     ))}
                     <View style={[styles.pieCenter, { backgroundColor: theme.colors.surface }]}>
                         <Text style={[styles.pieCenterAmount, { color: theme.colors.text }]}>
-                            {currencySymbol}{totalSpent.toLocaleString()}
+                            {currencySymbol}{totalInPeriod.toLocaleString()}
                         </Text>
                         <Text style={[styles.pieCenterLabel, { color: theme.colors.textSecondary }]}>Total</Text>
                     </View>
@@ -472,9 +495,31 @@ export default function InsightsScreen() {
                     </TouchableOpacity>
                 </View>
 
+                {viewMode === 'breakdown' && (
+                    <View style={[styles.typeToggle, { backgroundColor: theme.colors.surface }]}>
+                        <TouchableOpacity
+                            style={[styles.typeToggleBtn, transactionType === 'expense' && { backgroundColor: theme.colors.primary }]}
+                            onPress={() => setTransactionType('expense')}
+                        >
+                            <Text style={[styles.typeToggleText, { color: transactionType === 'expense' ? '#FFF' : theme.colors.textSecondary }]}>Expenses</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.typeToggleBtn, transactionType === 'income' && { backgroundColor: theme.colors.primary }]}
+                            onPress={() => setTransactionType('income')}
+                        >
+                            <Text style={[styles.typeToggleText, { color: transactionType === 'income' ? '#FFF' : theme.colors.textSecondary }]}>Income</Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
+
                 {viewMode === 'breakdown' ? renderBreakdown() : renderComparison()}
+
+                {/* Smart Insights */}
+                <View style={{ marginHorizontal: 16, marginTop: 8, marginBottom: 20 }}>
+                    <SmartInsightsCard selectedMonth={selectedMonth} />
+                </View>
             </ScrollView>
-        </SafeAreaView>
+        </SafeAreaView >
     );
 }
 
@@ -485,9 +530,12 @@ const styles = StyleSheet.create({
     loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
     loadingText: { fontSize: 16 },
 
-    viewToggle: { flexDirection: 'row', marginHorizontal: 16, borderRadius: 12, padding: 4, marginBottom: 16 },
+    viewToggle: { flexDirection: 'row', marginHorizontal: 16, borderRadius: 12, padding: 4, marginBottom: 8 },
     toggleBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 10, gap: 6 },
     toggleText: { fontSize: 14, fontWeight: '600' },
+    typeToggle: { flexDirection: 'row', marginHorizontal: 16, borderRadius: 12, padding: 4, marginBottom: 16 },
+    typeToggleBtn: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, borderRadius: 10 },
+    typeToggleText: { fontSize: 13, fontWeight: '600' },
 
     monthNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 8, gap: 12 },
     navBtn: { padding: 4 },

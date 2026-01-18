@@ -8,6 +8,9 @@ import authRoutes from './routes/auth.routes.js';
 import expenseRoutes from './routes/expense.routes.js';
 import categoryRoutes from './routes/category.routes.js';
 import budgetRoutes from './routes/budget.routes.js';
+import incomeRoutes from './routes/income.routes.js';
+import recurringRoutes from './routes/recurring.routes.js';
+import aiRoutes from './routes/ai.routes.js';
 
 // Connect to database
 connectDB();
@@ -28,6 +31,9 @@ app.use('/api/auth', authRoutes);
 app.use('/api/expenses', expenseRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/budgets', budgetRoutes);
+app.use('/api/income', incomeRoutes);
+app.use('/api/recurring', recurringRoutes);
+app.use('/api/ai', aiRoutes);
 
 // Health check route
 app.get('/api/health', (req, res) => {
@@ -49,6 +55,6 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on http://0.0.0.0:${PORT}`);
 });

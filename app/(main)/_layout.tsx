@@ -47,14 +47,14 @@ export default function MainLayout() {
       <Tabs.Screen
         name="expenses"
         options={{
-          title: 'Expenses',
+          title: 'Transactions',
           tabBarIcon: ({ color }) => (
-            <MaterialIcons name="receipt-long" size={24} color={color} />
+            <MaterialIcons name="swap-vert" size={24} color={color} />
           ),
         }}
       />
       <Tabs.Screen
-        name="add-expense"
+        name="add-transaction"
         options={{
           title: '',
           tabBarIcon: () => (
@@ -84,6 +84,30 @@ export default function MainLayout() {
       />
       <Tabs.Screen
         name="edit-expense"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="add-expense"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="add-income"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="recurring"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="categories"
         options={{
           href: null,
         }}

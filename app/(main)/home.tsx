@@ -42,11 +42,28 @@ interface Expense {
   paymentMethod: string;
 }
 
+interface Income {
+  _id: string;
+  amount: number;
+  source: string;
+  description?: string;
+  date: string;
+}
+
+type Transaction = (Expense & { type: 'expense' }) | (Income & { type: 'income' });
+
 interface User {
   name: string;
   currency: string;
   currencySymbol: string;
   monthlyBudget: number;
+}
+
+interface BalanceSummary {
+  totalIncome: number;
+  totalExpenses: number;
+  netBalance: number;
+  savingsRate: number;
 }
 
 export default function HomeScreen() {
@@ -57,11 +74,14 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [incomeList, setIncomeList] = useState<Income[]>([]);
+  const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
   const [totalSpent, setTotalSpent] = useState(0);
   const [todaySpent, setTodaySpent] = useState(0);
   const [weekSpent, setWeekSpent] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
   const [syncing, setSyncing] = useState(false);
+  const [balance, setBalance] = useState<BalanceSummary | null>(null);
 
   const fetchData = async () => {
     try {
@@ -87,15 +107,34 @@ export default function HomeScreen() {
         console.log('Network error, using cached data:', err.message);
       }
 
+      // Fetch income list
+      let fetchedIncome: Income[] = [];
+      try {
+        const incomeRes: any = await api.getIncome(token);
+        // Handle both 'data' and 'income' keys for compatibility
+        const incomeData = incomeRes.data || incomeRes.income;
+        if (incomeRes.success && Array.isArray(incomeData)) {
+          fetchedIncome = incomeData;
+          setIncomeList(fetchedIncome);
+          console.log('✅ Income loaded:', fetchedIncome.length, 'entries');
+        } else {
+          console.log('⚠️ Income fetch - no data:', incomeRes);
+        }
+      } catch (err) {
+        console.log('❌ Income fetch failed:', err);
+      }
+
       // Always use merged data (cached server + offline pending)
       try {
         const expenseList = await getMergedExpenses();
 
-        // Sort by date descending and take first 5 for recent
-        const sorted = [...expenseList].sort((a: any, b: any) =>
-          new Date(b.date).getTime() - new Date(a.date).getTime()
-        );
-        setExpenses(sorted.slice(0, 5) as Expense[]);
+        // Combine into unified activity using fetched income (not stale state)
+        const combinedByDate: Transaction[] = [
+          ...expenseList.map(e => ({ ...e, type: 'expense' as const })),
+          ...fetchedIncome.map(i => ({ ...i, type: 'income' as const }))
+        ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+        setRecentTransactions(combinedByDate.slice(0, 5));
 
         // Calculate monthly total (current month)
         const now = new Date();
@@ -121,7 +160,20 @@ export default function HomeScreen() {
           .reduce((sum: number, e: any) => sum + e.amount, 0);
         setWeekSpent(weekTotal);
       } catch (mergeErr) {
-        console.error('Failed to merge expenses:', mergeErr);
+        console.error('Failed to merge transactions:', mergeErr);
+      }
+
+      // Fetch income/expense balance
+      try {
+        const token = await AsyncStorage.getItem('@auth_token');
+        if (token) {
+          const balanceRes: any = await api.getBalance(token);
+          if (balanceRes.success && balanceRes.balance) {
+            setBalance(balanceRes.balance);
+          }
+        }
+      } catch (balanceErr) {
+        console.log('Balance fetch failed, continuing without:', balanceErr);
       }
 
     } catch (error) {
@@ -155,7 +207,7 @@ export default function HomeScreen() {
               showToast({ message: `Synced ${result.synced} offline expense(s)`, type: 'success' });
               // Refresh data after successful sync
               await fetchData();
-              
+
               // Check budget after sync
               try {
                 const { getBudgetWarning } = await import('../../utils/budgetNotification');
@@ -384,13 +436,56 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Recent Expenses */}
+        {/* Balance Card */}
+        {balance && (
+          <Card style={[styles.balanceCard, { backgroundColor: theme.colors.surface }] as any}>
+            <View style={styles.balanceTop}>
+              <View>
+                <Text style={[styles.balanceLabel, { color: theme.colors.textSecondary }]}>This Month's Balance</Text>
+                <Text style={[styles.balanceValue, { color: balance.netBalance >= 0 ? '#10B981' : '#EF4444' }]}>
+                  {balance.netBalance >= 0 ? '+' : ''}{currencySymbol}{balance.netBalance.toLocaleString()}
+                </Text>
+              </View>
+              <View style={[styles.savingsBadge, { backgroundColor: balance.savingsRate >= 0 ? '#10B98120' : '#EF444420' }]}>
+                <Text style={[styles.savingsText, { color: balance.savingsRate >= 0 ? '#10B981' : '#EF4444' }]}>
+                  {balance.savingsRate >= 0 ? '+' : ''}{balance.savingsRate}% Saved
+                </Text>
+              </View>
+            </View>
+
+            <View style={[styles.balanceDivider, { backgroundColor: theme.colors.border }]} />
+
+            <View style={styles.balanceBottom}>
+              <View style={styles.balanceSubItem}>
+                <View style={[styles.itemIcon, { backgroundColor: '#10B98120' }]}>
+                  <MaterialIcons name="arrow-downward" size={18} color="#10B981" />
+                </View>
+                <View>
+                  <Text style={[styles.itemLabel, { color: theme.colors.textSecondary }]}>Income</Text>
+                  <Text style={[styles.itemValue, { color: '#10B981' }]}>+{currencySymbol}{balance.totalIncome.toLocaleString()}</Text>
+                </View>
+              </View>
+              <View style={[styles.itemSeparator, { backgroundColor: theme.colors.border }]} />
+              <View style={styles.balanceSubItem}>
+                <View style={[styles.itemIcon, { backgroundColor: '#EF444420' }]}>
+                  <MaterialIcons name="arrow-upward" size={18} color="#EF4444" />
+                </View>
+                <View>
+                  <Text style={[styles.itemLabel, { color: theme.colors.textSecondary }]}>Expenses</Text>
+                  <Text style={[styles.itemValue, { color: '#EF4444' }]}>-{currencySymbol}{balance.totalExpenses.toLocaleString()}</Text>
+                </View>
+              </View>
+            </View>
+          </Card>
+        )}
+
+        {/* Recent Activity */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
               Recent Activity
             </Text>
-            {expenses.length > 0 && (
+            {recentTransactions.length > 0 && (
               <TouchableOpacity onPress={() => router.push({ pathname: '/(main)/expenses', params: { category: '' } })}>
                 <Text style={[styles.seeAll, { color: theme.colors.primary }]}>
                   See All →
@@ -399,69 +494,50 @@ export default function HomeScreen() {
             )}
           </View>
 
-          {expenses.length === 0 ? (
-            <Card style={styles.emptyCard}>
-              <View style={[styles.emptyIconWrapper, { backgroundColor: theme.colors.primary + '15' }]}>
-                <MaterialIcons name="receipt-long" size={32} color={theme.colors.primary} />
+          <Card style={styles.activityCard}>
+            {recentTransactions.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <MaterialIcons name="receipt-long" size={40} color={theme.colors.textTertiary} />
+                <Text style={[styles.emptyText, { color: theme.colors.textSecondary }]}>
+                  No recent activity
+                </Text>
               </View>
-              <Text style={[styles.emptyTitle, { color: theme.colors.text }]}>
-                No expenses yet
-              </Text>
-              <Text style={[styles.emptyText, { color: theme.colors.textSecondary }]}>
-                Start tracking your spending by{'\n'}adding your first expense
-              </Text>
-              <TouchableOpacity
-                style={[styles.emptyButton, { backgroundColor: theme.colors.primary }]}
-                onPress={() => router.push('/(main)/add-expense')}
-              >
-                <MaterialIcons name="add" size={18} color="#FFFFFF" />
-                <Text style={styles.emptyButtonText}>Add Expense</Text>
-              </TouchableOpacity>
-            </Card>
-          ) : (
-            expenses.map((expense) => {
-              const config = CATEGORY_CONFIG[expense.category] || CATEGORY_CONFIG.Other;
-              return (
-                <TouchableOpacity
-                  key={expense._id}
-                  activeOpacity={0.7}
-                  onPress={() => router.push({
-                    pathname: '/(main)/edit-expense',
-                    params: {
-                      id: expense._id,
-                      amount: expense.amount,
-                      category: expense.category,
-                      paymentMethod: expense.paymentMethod,
-                      description: expense.description || '',
-                      date: expense.date,
-                    },
-                  })}
-                >
-                  <Card style={styles.expenseCard}>
-                    <View style={styles.expenseRow}>
-                      <View style={[styles.categoryIcon, { backgroundColor: config.color + '15' }]}>
-                        <MaterialIcons name={config.icon as any} size={22} color={config.color} />
+            ) : (
+              recentTransactions.map((item, index) => {
+                const isIncome = item.type === 'income';
+                const config = isIncome ? { color: '#10B981', icon: 'trending-up' } : (CATEGORY_CONFIG[(item as Expense).category] || CATEGORY_CONFIG.Other);
+                return (
+                  <View key={item._id}>
+                    <TouchableOpacity
+                      style={styles.activityItem}
+                      onPress={() => isIncome ? null : router.push({ pathname: '/(main)/edit-expense', params: { id: item._id } })}
+                    >
+                      <View style={[styles.activityIcon, { backgroundColor: config.color + '15' }]}>
+                        <MaterialIcons name={config.icon as any} size={20} color={config.color} />
                       </View>
-                      <View style={styles.expenseInfo}>
-                        <Text style={[styles.expenseCategory, { color: theme.colors.text }]}>
-                          {expense.description || expense.category}
+                      <View style={styles.activityDetails}>
+                        <Text style={[styles.activityTitle, { color: theme.colors.text }]} numberOfLines={1}>
+                          {item.description || (isIncome ? (item as Income).source : (item as Expense).category)}
                         </Text>
-                        <Text style={[styles.expenseDate, { color: theme.colors.textSecondary }]}>
-                          {expense.category} • {formatDate(expense.date)}
+                        <Text style={[styles.activitySubtitle, { color: theme.colors.textSecondary }]}>
+                          {new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} • {isIncome ? 'Income' : (item as Expense).paymentMethod}
                         </Text>
                       </View>
-                      <View style={styles.expenseRight}>
-                        <Text style={[styles.expenseAmount, { color: theme.colors.text }]}>
-                          -{currencySymbol}{expense.amount.toLocaleString()}
-                        </Text>
-                        <MaterialIcons name="chevron-right" size={18} color={theme.colors.textTertiary} />
-                      </View>
-                    </View>
-                  </Card>
-                </TouchableOpacity>
-              );
-            })
-          )}
+                      <Text style={[
+                        styles.activityAmount,
+                        { color: isIncome ? '#10B981' : theme.colors.text }
+                      ]}>
+                        {isIncome ? '+' : '-'}{currencySymbol}{item.amount.toLocaleString()}
+                      </Text>
+                    </TouchableOpacity>
+                    {index < recentTransactions.length - 1 && (
+                      <View style={[styles.divider, { backgroundColor: theme.colors.border }]} />
+                    )}
+                  </View>
+                );
+              })
+            )}
+          </Card>
         </View>
 
         <View style={{ height: 100 }} />
@@ -694,5 +770,212 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+  },
+  // Premium Balance Card Styles
+  balanceCard: {
+    padding: 24,
+    borderRadius: 24,
+    marginHorizontal: 20,
+    marginBottom: 24,
+  },
+  balanceTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  balanceLabel: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  balanceValue: {
+    color: '#FFF',
+    fontSize: 32,
+    fontWeight: '800',
+  },
+  savingsBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  savingsText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  balanceDivider: {
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    marginVertical: 20,
+  },
+  balanceBottom: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  balanceSubItem: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  itemIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  itemLabel: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 11,
+    fontWeight: '500',
+    textTransform: 'uppercase',
+  },
+  itemValue: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
+    marginTop: 1,
+  },
+  itemSeparator: {
+    width: 1,
+    height: 30,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    marginHorizontal: 15,
+  },
+
+  // Action Row
+  actionRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    marginBottom: 24,
+  },
+  mainAddBtn: {
+    flex: 1,
+    height: 56,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+  },
+  addBtnContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  mainAddBtnText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+
+  // Activity Styles
+  activityCard: {
+    padding: 8,
+    borderRadius: 20,
+  },
+  activityItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+  },
+  activityIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  activityDetails: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  activityTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  activitySubtitle: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  activityAmount: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  divider: {
+    height: 1,
+    marginHorizontal: 12,
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    gap: 12,
+  },
+
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  menuContainer: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 24,
+    paddingBottom: 40,
+  },
+  menuHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  menuCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  menuSubtitle: {
+    fontSize: 14,
+    marginBottom: 24,
+  },
+  menuOptions: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    gap: 20,
+  },
+  menuOption: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 12,
+  },
+  menuIcon: {
+    width: 70,
+    height: 70,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+  },
+  menuText: {
+    fontSize: 15,
+    fontWeight: '600',
   },
 });

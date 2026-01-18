@@ -10,7 +10,33 @@ router.use(protect);
 // Create expense
 router.post('/', async (req, res) => {
     try {
-        const { amount, category, categoryIcon, paymentMethod, description, date, localId } = req.body;
+        const {
+            amount,
+            category,
+            categoryIcon,
+            paymentMethod,
+            description,
+            date,
+            localId,
+            // Split fields
+            isSplit,
+            splitType,
+            participants,
+            userShare,
+        } = req.body;
+
+        // Calculate totals for split expenses
+        let totalOwed = 0;
+        let processedParticipants = [];
+
+        if (isSplit && participants && participants.length > 0) {
+            processedParticipants = participants.map(p => ({
+                ...p,
+                isPaid: p.isPaid || false,
+                paidAmount: p.paidAmount || 0,
+            }));
+            totalOwed = processedParticipants.reduce((sum, p) => sum + (p.shareAmount || 0), 0);
+        }
 
         const expense = await Expense.create({
             userId: req.user._id,
@@ -22,6 +48,12 @@ router.post('/', async (req, res) => {
             date: date || new Date(),
             localId,
             synced: true,
+            isSplit: isSplit || false,
+            splitType: splitType || 'equal',
+            participants: processedParticipants,
+            userShare: userShare || (isSplit ? amount - totalOwed : amount),
+            totalOwed,
+            totalPaid: 0,
         });
 
         res.status(201).json({
@@ -539,6 +571,105 @@ router.get('/insights', async (req, res) => {
                 currentMonth: { month: currentMonth, year: currentYear, total: currentTotal },
                 lastMonth: { month: lastMonth, year: lastMonthYear, total: lastTotal },
                 insights,
+            },
+        });
+    } catch (error) {
+        res.status(400).json({
+            success: false,
+            message: error.message,
+        });
+    }
+});
+
+// Update participant payment status
+router.put('/:id/participants/:participantId/payment', async (req, res) => {
+    try {
+        const { isPaid, paidAmount } = req.body;
+
+        const expense = await Expense.findOne({
+            _id: req.params.id,
+            userId: req.user._id,
+            isSplit: true,
+        });
+
+        if (!expense) {
+            return res.status(404).json({
+                success: false,
+                message: 'Split expense not found',
+            });
+        }
+
+        const participant = expense.participants.id(req.params.participantId);
+
+        if (!participant) {
+            return res.status(404).json({
+                success: false,
+                message: 'Participant not found',
+            });
+        }
+
+        participant.isPaid = isPaid;
+        participant.paidAmount = paidAmount || (isPaid ? participant.shareAmount : 0);
+        participant.paidDate = isPaid ? new Date() : null;
+
+        // Recalculate total paid
+        expense.totalPaid = expense.participants.reduce((sum, p) => sum + (p.paidAmount || 0), 0);
+
+        await expense.save();
+
+        res.json({
+            success: true,
+            data: expense,
+            message: isPaid ? 'Marked as paid' : 'Marked as unpaid',
+        });
+    } catch (error) {
+        res.status(400).json({
+            success: false,
+            message: error.message,
+        });
+    }
+});
+
+// Get split expense balances (who owes whom)
+router.get('/split/balances', async (req, res) => {
+    try {
+        const splitExpenses = await Expense.find({
+            userId: req.user._id,
+            isSplit: true,
+        }).sort({ date: -1 });
+
+        // Calculate balances per person
+        const balances = {};
+
+        for (const expense of splitExpenses) {
+            for (const participant of expense.participants) {
+                const key = participant.phone || participant.name;
+                if (!balances[key]) {
+                    balances[key] = {
+                        name: participant.name,
+                        phone: participant.phone,
+                        totalOwed: 0,
+                        totalPaid: 0,
+                        pendingAmount: 0,
+                    };
+                }
+                balances[key].totalOwed += participant.shareAmount || 0;
+                balances[key].totalPaid += participant.paidAmount || 0;
+                if (!participant.isPaid) {
+                    balances[key].pendingAmount += (participant.shareAmount || 0) - (participant.paidAmount || 0);
+                }
+            }
+        }
+
+        const balanceList = Object.values(balances).sort((a, b) => b.pendingAmount - a.pendingAmount);
+
+        res.json({
+            success: true,
+            data: {
+                totalOwedToYou: balanceList.reduce((sum, b) => sum + b.totalOwed, 0),
+                totalPaidBack: balanceList.reduce((sum, b) => sum + b.totalPaid, 0),
+                pendingTotal: balanceList.reduce((sum, b) => sum + b.pendingAmount, 0),
+                balances: balanceList,
             },
         });
     } catch (error) {

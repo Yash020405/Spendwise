@@ -1,5 +1,34 @@
 import mongoose from 'mongoose';
 
+// Participant schema for split expenses
+const participantSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: true,
+  },
+  phone: {
+    type: String,
+  },
+  shareAmount: {
+    type: Number,
+    default: 0,
+  },
+  sharePercentage: {
+    type: Number,
+  },
+  isPaid: {
+    type: Boolean,
+    default: false,
+  },
+  paidDate: {
+    type: Date,
+  },
+  paidAmount: {
+    type: Number,
+    default: 0,
+  },
+}, { _id: true });
+
 const expenseSchema = new mongoose.Schema(
   {
     userId: {
@@ -44,6 +73,28 @@ const expenseSchema = new mongoose.Schema(
     synced: {
       type: Boolean,
       default: true,
+    },
+    // Split expense fields
+    isSplit: {
+      type: Boolean,
+      default: false,
+    },
+    splitType: {
+      type: String,
+      enum: ['equal', 'custom', 'percentage'],
+      default: 'equal',
+    },
+    participants: [participantSchema],
+    userShare: {
+      type: Number, // The current user's portion of the expense
+    },
+    totalOwed: {
+      type: Number, // Total amount others owe the user
+      default: 0,
+    },
+    totalPaid: {
+      type: Number, // Total amount already paid back
+      default: 0,
     },
   },
   {

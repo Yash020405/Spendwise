@@ -304,6 +304,28 @@ export default function ProfileScreen() {
           </Card>
         </View>
 
+        {/* Quick Access */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>
+            QUICK ACCESS
+          </Text>
+          <Card style={styles.menuCard}>
+            <MenuItem
+              icon="repeat"
+              title="Recurring Transactions"
+              subtitle="Manage auto-repeat expenses & income"
+              onPress={() => router.push('/(main)/recurring' as any)}
+            />
+            <View style={[styles.divider, { backgroundColor: theme.colors.border }]} />
+            <MenuItem
+              icon="category"
+              title="Categories"
+              subtitle="Customize expense categories"
+              onPress={() => router.push('/(main)/categories' as any)}
+            />
+          </Card>
+        </View>
+
         {/* Appearance */}
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: theme.colors.textSecondary }]}>
