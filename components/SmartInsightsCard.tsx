@@ -37,6 +37,30 @@ export default function SmartInsightsCard({ selectedMonth }: SmartInsightsCardPr
         return selectedMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     };
 
+    // Hardcoded fallback insights for offline mode
+    const getOfflineFallbackInsights = (): Insight[] => [
+        {
+            type: 'tip',
+            title: 'Offline Mode',
+            message: 'You\'re currently offline. Your recent transactions are saved locally and will sync when you\'re back online.',
+        },
+        {
+            type: 'info',
+            title: 'Track Every Expense',
+            message: 'Logging all expenses, even small ones, helps build a complete picture of your spending habits.',
+        },
+        {
+            type: 'tip',
+            title: 'Set a Budget Goal',
+            message: 'Create monthly budget limits for categories like Food and Entertainment to stay on track.',
+        },
+        {
+            type: 'success',
+            title: 'Split Wisely',
+            message: 'Use the split expense feature to easily track shared costs with friends and family.',
+        },
+    ];
+
     const fetchInsights = async () => {
         setLoading(true);
         setError(null);
@@ -49,19 +73,27 @@ export default function SmartInsightsCard({ selectedMonth }: SmartInsightsCardPr
             const month = targetDate.getMonth();  // 0-indexed
             const year = targetDate.getFullYear();
 
-            console.log('🔍 SmartInsights: Fetching for', targetDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }), '-> month:', month, 'year:', year);
 
-            const response: any = await api.getAIInsights(token, 'month', month, year);
-            console.log('🔍 SmartInsights: Full API Response:', JSON.stringify(response, null, 2));
-            if (response.success && response.data) {
-                console.log('🔍 SmartInsights: Summary data:', response.data.summary);
-                setInsights(response.data.insights || []);
-                setSummary(response.data.summary);
-            } else {
-                setError('Unable to generate insights');
+            try {
+                const response: any = await api.getAIInsights(token, 'month', month, year);
+                if (response.success && response.data) {
+                    setInsights(response.data.insights || []);
+                    setSummary(response.data.summary);
+                } else {
+                    // API returned but no valid data - use fallback
+                    setInsights(getOfflineFallbackInsights());
+                    setSummary(null);
+                }
+            } catch (apiErr: any) {
+                // Network error or API failure - use offline fallback
+                setInsights(getOfflineFallbackInsights());
+                setSummary(null);
+                // Don't show error since we have fallback
             }
         } catch (err: any) {
-            setError(err.message || 'Failed to get insights');
+            // Token or other error - show fallback anyway
+            setInsights(getOfflineFallbackInsights());
+            setSummary(null);
         } finally {
             setLoading(false);
         }

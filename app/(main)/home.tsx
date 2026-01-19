@@ -103,8 +103,7 @@ export default function HomeScreen() {
           await cacheExpenses(expensesResponse.data);
         }
       } catch (err: any) {
-        // Network error - we'll use cached + offline data (no error toast)
-        console.log('Network error, using cached data:', err.message);
+        // Network error - we'll use cached + offline data
       }
 
       // Fetch income list
@@ -116,12 +115,9 @@ export default function HomeScreen() {
         if (incomeRes.success && Array.isArray(incomeData)) {
           fetchedIncome = incomeData;
           setIncomeList(fetchedIncome);
-          console.log('✅ Income loaded:', fetchedIncome.length, 'entries');
         } else {
-          console.log('⚠️ Income fetch - no data:', incomeRes);
         }
       } catch (err) {
-        console.log('❌ Income fetch failed:', err);
       }
 
       // Always use merged data (cached server + offline pending)
@@ -173,11 +169,9 @@ export default function HomeScreen() {
           }
         }
       } catch (balanceErr) {
-        console.log('Balance fetch failed, continuing without:', balanceErr);
       }
 
     } catch (error) {
-      console.log('Fetch data error:', error);
     } finally {
       setLoading(false);
     }
@@ -222,7 +216,6 @@ export default function HomeScreen() {
                   }, 1000);
                 }
               } catch (e) {
-                console.log('Budget check failed:', e);
               }
             }
             const newCount = await getPendingCount();
@@ -230,7 +223,7 @@ export default function HomeScreen() {
           } catch (syncError: any) {
             // Only show error if it's not a network issue
             if (!syncError.message?.includes('Network') && !syncError.message?.includes('fetch')) {
-              console.log('Sync error:', syncError.message);
+              // Silent sync error for network issues
             }
           }
         }

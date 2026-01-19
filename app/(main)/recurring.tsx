@@ -18,6 +18,7 @@ import { useTheme } from '../../utils/ThemeContext';
 import { useToast } from '../../components/Toast';
 import { Card } from '../../components/ui';
 import api from '../../utils/api';
+import { saveOfflineRecurring, getMergedRecurring, cacheRecurring } from '../../utils/offlineSync';
 
 const FREQUENCIES = [
     { value: 'daily', label: 'Daily', icon: 'today' },
@@ -99,12 +100,22 @@ export default function RecurringScreen() {
             const token = await AsyncStorage.getItem('@auth_token');
             if (!token) return;
 
-            const response: any = await api.getRecurring(token);
-            if (response.success) {
-                setRecurring(response.data);
+            try {
+                const response: any = await api.getRecurring(token);
+                if (response.success) {
+                    // Cache the server data
+                    await cacheRecurring(response.data);
+                    // Display merged (server + offline)
+                    const merged = await getMergedRecurring();
+                    setRecurring(merged);
+                }
+            } catch (error: any) {
+                // Network error - use cached/merged data
+                const merged = await getMergedRecurring();
+                setRecurring(merged);
             }
         } catch (error) {
-            console.error('Failed to fetch recurring:', error);
+            // Failed to fetch recurring
         } finally {
             setLoading(false);
             setRefreshing(false);
@@ -190,7 +201,7 @@ export default function RecurringScreen() {
             const token = await AsyncStorage.getItem('@auth_token');
             if (!token) return;
 
-            const response: any = await api.createRecurring(token, {
+            const recurringData = {
                 type: formType,
                 amount: parseFloat(formAmount),
                 category: formType === 'expense' ? formCategory : undefined,
@@ -198,13 +209,27 @@ export default function RecurringScreen() {
                 description: formDescription || undefined,
                 frequency: formFrequency as any,
                 dayOfMonth: formFrequency === 'monthly' ? parseInt(formDayOfMonth) : undefined,
-            });
+            };
 
-            if (response.success) {
-                showToast({ message: 'Recurring added!', type: 'success' });
-                setShowAddModal(false);
-                resetForm();
-                fetchRecurring();
+            try {
+                const response: any = await api.createRecurring(token, recurringData);
+                if (response.success) {
+                    showToast({ message: 'Recurring added!', type: 'success' });
+                    setShowAddModal(false);
+                    resetForm();
+                    fetchRecurring();
+                }
+            } catch (error: any) {
+                // Network error - save offline
+                if (error.message?.includes('Network')) {
+                    await saveOfflineRecurring(recurringData);
+                    showToast({ message: 'Recurring saved offline', type: 'success' });
+                    setShowAddModal(false);
+                    resetForm();
+                    fetchRecurring();
+                } else {
+                    showToast({ message: 'Failed to create recurring', type: 'error' });
+                }
             }
         } catch (error) {
             showToast({ message: 'Failed to create', type: 'error' });
@@ -287,7 +312,7 @@ export default function RecurringScreen() {
                     recurring.map((item) => {
                         const config = getItemConfig(item);
                         return (
-                            <Card key={item._id} style={[styles.itemCard, !item.isActive && { opacity: 0.6 }]}>
+                            <Card key={item._id} style={[styles.itemCard, !item.isActive && { opacity: 0.6 }] as any}>
                                 <View style={styles.itemRow}>
                                     <View style={[styles.iconBox, { backgroundColor: config.color + '20' }]}>
                                         <MaterialIcons name={config.icon as any} size={22} color={config.color} />

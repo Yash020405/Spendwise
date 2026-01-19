@@ -19,8 +19,9 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../../utils/ThemeContext';
 import { useToast } from '../../components/Toast';
 import api from '../../utils/api';
-import { saveOfflineExpense, getMergedExpenses } from '../../utils/offlineSync';
+import { saveOfflineExpense, saveOfflineIncome, saveOfflineRecurring } from '../../utils/offlineSync';
 import { checkBudgetAfterExpense, getBudgetWarning } from '../../utils/budgetNotification';
+import SplitModal from '../../components/SplitModal';
 
 const CATEGORIES = [
     { name: 'Food', icon: 'restaurant', color: '#F59E0B' },
@@ -47,6 +48,13 @@ const PAYMENT_METHODS = [
     { id: 'Card', icon: 'credit-card', color: '#3B82F6' },
     { id: 'UPI', icon: 'phone-android', color: '#8B5CF6' },
     { id: 'Bank Transfer', icon: 'account-balance', color: '#F59E0B' },
+];
+
+const RECURRING_FREQUENCIES = [
+    { id: 'daily', label: 'Daily' },
+    { id: 'weekly', label: 'Weekly' },
+    { id: 'monthly', label: 'Monthly' },
+    { id: 'yearly', label: 'Yearly' },
 ];
 
 const CALC_BUTTONS = [
@@ -81,6 +89,17 @@ export default function AddTransactionScreen() {
     const [calcDisplay, setCalcDisplay] = useState('0');
     const [currencySymbol, setCurrencySymbol] = useState('₹');
 
+    // Split expense state (only for expenses)
+    const [showSplitModal, setShowSplitModal] = useState(false);
+    const [isSplit, setIsSplit] = useState(false);
+    const [splitType, setSplitType] = useState<'equal' | 'custom' | 'percentage'>('equal');
+    const [participants, setParticipants] = useState<any[]>([]);
+    const [userShare, setUserShare] = useState(0);
+
+    // Recurring transaction state
+    const [isRecurring, setIsRecurring] = useState(false);
+    const [recurringFrequency, setRecurringFrequency] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly');
+
     useFocusEffect(
         useCallback(() => {
             setAmount('');
@@ -91,6 +110,13 @@ export default function AddTransactionScreen() {
             setTransactionDate(new Date());
             setCalcDisplay('0');
             setIsIncome(false);
+            // Reset split state
+            setIsSplit(false);
+            setParticipants([]);
+            setUserShare(0);
+            // Reset recurring state
+            setIsRecurring(false);
+            setRecurringFrequency('monthly');
         }, [])
     );
 
@@ -116,6 +142,14 @@ export default function AddTransactionScreen() {
             setCalcDisplay('0');
         }
         setShowCalculator(true);
+    };
+
+    // Handle split expense save
+    const handleSplitSave = (splitParticipants: any[], type: 'equal' | 'custom' | 'percentage', share: number) => {
+        setParticipants(splitParticipants);
+        setSplitType(type);
+        setUserShare(share);
+        setIsSplit(splitParticipants.length > 0);
     };
 
     const handleSubmit = async () => {
@@ -144,37 +178,108 @@ export default function AddTransactionScreen() {
                 // Create income
                 const incomeData = {
                     amount: parseFloat(amount),
-                    source: selectedSource,
-                    description: description.trim() || undefined,
-                    date: transactionDate.toISOString(),
-                };
-                const response: any = await api.createIncome(token, incomeData);
-                if (response.success) {
-                    showToast({ message: 'Income added successfully', type: 'success' });
-                    router.back();
-                } else {
-                    showToast({ message: response.message || 'Failed to save income', type: 'error' });
-                }
-            } else {
-                // Create expense
-                const expenseData = {
-                    amount: parseFloat(amount),
-                    category: selectedCategory,
-                    paymentMethod,
+                    source: selectedSource!,
                     description: description.trim() || undefined,
                     date: transactionDate.toISOString(),
                 };
                 try {
+                    const response: any = await api.createIncome(token, incomeData);
+                    if (response.success) {
+                        // If recurring is enabled for income
+                        if (isRecurring) {
+                            try {
+                                await api.createRecurring(token, {
+                                    type: 'income',
+                                    amount: parseFloat(amount),
+                                    source: selectedSource!,
+                                    description: description.trim() || undefined,
+                                    frequency: recurringFrequency,
+                                    dayOfMonth: recurringFrequency === 'monthly' ? transactionDate.getDate() : undefined,
+                                });
+                                showToast({ message: 'Income added + recurring set up!', type: 'success' });
+                            } catch {
+                                // Save recurring offline if network fails
+                                await saveOfflineRecurring({
+                                    type: 'income',
+                                    amount: parseFloat(amount),
+                                    source: selectedSource!,
+                                    description: description.trim() || undefined,
+                                    frequency: recurringFrequency,
+                                    dayOfMonth: recurringFrequency === 'monthly' ? transactionDate.getDate() : undefined,
+                                });
+                                showToast({ message: 'Income added, recurring saved offline', type: 'success' });
+                            }
+                        } else {
+                            showToast({ message: 'Income added successfully', type: 'success' });
+                        }
+                        router.back();
+                    } else {
+                        showToast({ message: response.message || 'Failed to save income', type: 'error' });
+                    }
+                } catch (error: any) {
+                    // Network error - save offline
+                    if (error.message?.includes('Network')) {
+                        await saveOfflineIncome(incomeData);
+                        showToast({ message: 'Income saved offline', type: 'success' });
+                        router.back();
+                    } else {
+                        showToast({ message: 'Failed to save income', type: 'error' });
+                    }
+                }
+            } else {
+                // Create expense with split data
+                const expenseData: any = {
+                    amount: parseFloat(amount),
+                    category: selectedCategory!,
+                    paymentMethod,
+                    description: description.trim() || undefined,
+                    date: transactionDate.toISOString(),
+                    // Split expense data
+                    isSplit,
+                    splitType: isSplit ? splitType : undefined,
+                    participants: isSplit ? participants : undefined,
+                    userShare: isSplit ? userShare : undefined,
+                };
+
+                try {
                     const response: any = await api.createExpense(token, expenseData);
                     if (response.success) {
-                        showToast({ message: 'Expense added successfully', type: 'success' });
+                        // If recurring is enabled
+                        if (isRecurring) {
+                            try {
+                                await api.createRecurring(token, {
+                                    type: 'expense',
+                                    amount: parseFloat(amount),
+                                    category: selectedCategory!,
+                                    paymentMethod,
+                                    description: description.trim() || undefined,
+                                    frequency: recurringFrequency,
+                                    dayOfMonth: recurringFrequency === 'monthly' ? transactionDate.getDate() : undefined,
+                                });
+                                showToast({ message: 'Expense added + recurring set up!', type: 'success' });
+                            } catch {
+                                // Save recurring offline if API fails
+                                await saveOfflineRecurring({
+                                    type: 'expense',
+                                    amount: parseFloat(amount),
+                                    category: selectedCategory!,
+                                    paymentMethod,
+                                    description: description.trim() || undefined,
+                                    frequency: recurringFrequency,
+                                    dayOfMonth: recurringFrequency === 'monthly' ? transactionDate.getDate() : undefined,
+                                });
+                                showToast({ message: 'Expense added, recurring saved offline', type: 'success' });
+                            }
+                        } else {
+                            showToast({ message: isSplit ? `Split expense added with ${participants.length} people` : 'Expense added successfully', type: 'success' });
+                        }
                         router.back();
                     } else {
                         showToast({ message: response.message || 'Failed to save expense', type: 'error' });
                     }
                 } catch (error: any) {
                     if (error.message?.includes('Network')) {
-                        await saveOfflineExpense(expenseData);
+                        await saveOfflineExpense({ ...expenseData, category: selectedCategory! });
                         showToast({ message: 'Saved offline', type: 'success' });
                         router.back();
                     } else {
@@ -372,6 +477,80 @@ export default function AddTransactionScreen() {
                         </>
                     )}
 
+                    {/* Split Expense (only for expenses) */}
+                    {!isIncome && (
+                        <>
+                            <Text style={[styles.label, { color: theme.colors.textSecondary }]}>Split Expense</Text>
+                            <TouchableOpacity
+                                style={[styles.selector, { backgroundColor: theme.colors.surface }]}
+                                onPress={() => setShowSplitModal(true)}
+                            >
+                                <View style={styles.selectedItem}>
+                                    <View style={[styles.iconBox, { backgroundColor: '#8B5CF6' + '20' }]}>
+                                        <MaterialIcons name="group" size={20} color="#8B5CF6" />
+                                    </View>
+                                    <Text style={[styles.selectorText, { color: isSplit ? theme.colors.text : theme.colors.textTertiary }]}>
+                                        {isSplit ? `Split with ${participants.length} ${participants.length === 1 ? 'person' : 'people'}` : 'Not splitting'}
+                                    </Text>
+                                </View>
+                                <MaterialIcons name="keyboard-arrow-right" size={24} color={theme.colors.textSecondary} />
+                            </TouchableOpacity>
+
+                            {/* Show split summary */}
+                            {isSplit && participants.length > 0 && (
+                                <View style={[styles.splitSummary, { backgroundColor: '#8B5CF6' + '10' }]}>
+                                    <Text style={[styles.splitSummaryText, { color: theme.colors.text }]}>
+                                        Your share: {currencySymbol}{userShare.toLocaleString()}
+                                    </Text>
+                                    <Text style={[styles.splitSummaryText, { color: theme.colors.textSecondary }]}>
+                                        Others owe: {currencySymbol}{(parseFloat(amount || '0') - userShare).toLocaleString()}
+                                    </Text>
+                                </View>
+                            )}
+                        </>
+                    )}
+
+                    {/* Recurring Toggle */}
+                    <Text style={[styles.label, { color: theme.colors.textSecondary }]}>Recurring</Text>
+                    <TouchableOpacity
+                        style={[styles.selector, { backgroundColor: theme.colors.surface }]}
+                        onPress={() => setIsRecurring(!isRecurring)}
+                    >
+                        <View style={styles.selectedItem}>
+                            <View style={[styles.iconBox, { backgroundColor: isRecurring ? '#10B981' + '20' : '#6B7280' + '20' }]}>
+                                <MaterialIcons name="repeat" size={20} color={isRecurring ? '#10B981' : '#6B7280'} />
+                            </View>
+                            <Text style={[styles.selectorText, { color: isRecurring ? theme.colors.text : theme.colors.textTertiary }]}>
+                                {isRecurring ? `Repeats ${recurringFrequency}` : 'One-time transaction'}
+                            </Text>
+                        </View>
+                        <MaterialIcons name={isRecurring ? 'toggle-on' : 'toggle-off'} size={32} color={isRecurring ? '#10B981' : theme.colors.textTertiary} />
+                    </TouchableOpacity>
+
+                    {/* Recurring Frequency */}
+                    {isRecurring && (
+                        <View style={styles.frequencyRow}>
+                            {RECURRING_FREQUENCIES.map((freq) => (
+                                <TouchableOpacity
+                                    key={freq.id}
+                                    style={[
+                                        styles.frequencyBtn,
+                                        { backgroundColor: theme.colors.surface },
+                                        recurringFrequency === freq.id && { backgroundColor: accentColor }
+                                    ]}
+                                    onPress={() => setRecurringFrequency(freq.id as any)}
+                                >
+                                    <Text style={[
+                                        styles.frequencyText,
+                                        { color: recurringFrequency === freq.id ? '#FFF' : theme.colors.textSecondary }
+                                    ]}>
+                                        {freq.label}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    )}
+
                     {/* Note */}
                     <Text style={[styles.label, { color: theme.colors.textSecondary }]}>Note (optional)</Text>
                     <TextInput
@@ -397,6 +576,15 @@ export default function AddTransactionScreen() {
                         </Text>
                     </TouchableOpacity>
                 </View>
+
+                {/* Split Modal */}
+                <SplitModal
+                    visible={showSplitModal}
+                    onClose={() => setShowSplitModal(false)}
+                    totalAmount={parseFloat(amount) || 0}
+                    currencySymbol={currencySymbol}
+                    onSave={handleSplitSave}
+                />
 
                 {/* Date Picker */}
                 {showDatePicker && (
@@ -591,12 +779,21 @@ const styles = StyleSheet.create({
     modalItemText: { fontSize: 16, flex: 1 },
 
     calcModal: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 34 },
-    calcDisplay: { marginHorizontal: 20, marginBottom: 16, padding: 20, borderRadius: 16, alignItems: 'flex-end' },
-    calcDisplayText: { fontSize: 40, fontWeight: '600' },
+    calcDisplay: { marginHorizontal: 20, marginBottom: 16, padding: 20, borderRadius: 16, alignItems: 'flex-end' as const },
+    calcDisplayText: { fontSize: 40, fontWeight: '600' as const },
     calcGrid: { paddingHorizontal: 20 },
-    calcRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
-    calcBtn: { width: '22%', aspectRatio: 1.3, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-    calcBtnText: { fontSize: 24, fontWeight: '500' },
-    calcApplyBtn: { marginHorizontal: 20, marginTop: 8, padding: 16, borderRadius: 14, alignItems: 'center' },
-    calcApplyText: { color: '#FFF', fontSize: 17, fontWeight: '600' },
+    calcRow: { flexDirection: 'row' as const, justifyContent: 'space-between' as const, marginBottom: 12 },
+    calcBtn: { width: '22%' as any, aspectRatio: 1.3, borderRadius: 16, alignItems: 'center' as const, justifyContent: 'center' as const },
+    calcBtnText: { fontSize: 24, fontWeight: '500' as const },
+    calcApplyBtn: { marginHorizontal: 20, marginTop: 8, padding: 16, borderRadius: 14, alignItems: 'center' as const },
+    calcApplyText: { color: '#FFF', fontSize: 17, fontWeight: '600' as const },
+
+    // Split expense styles
+    splitSummary: { marginTop: 8, padding: 12, borderRadius: 10, flexDirection: 'row' as const, justifyContent: 'space-between' as const },
+    splitSummaryText: { fontSize: 14, fontWeight: '500' as const },
+
+    // Recurring styles
+    frequencyRow: { flexDirection: 'row' as const, gap: 8, marginTop: 8 },
+    frequencyBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center' as const },
+    frequencyText: { fontSize: 13, fontWeight: '500' as const },
 });

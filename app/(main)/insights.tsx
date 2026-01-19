@@ -105,7 +105,7 @@ export default function InsightsScreen() {
                     setIncomeList(incResponse.data);
                 }
             } catch (error: any) {
-                console.log('Error fetching data:', error.message);
+                // Error fetching data - will use cached
             }
 
             // Always use merged data (cached + offline) for expenses

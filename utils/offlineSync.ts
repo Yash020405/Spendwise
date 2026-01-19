@@ -4,6 +4,10 @@ import api from './api';
 const PENDING_EXPENSES_KEY = '@pending_expenses';
 const PENDING_DELETES_KEY = '@pending_deletes';
 const PENDING_UPDATES_KEY = '@pending_updates';
+const PENDING_INCOME_KEY = '@pending_income';
+const PENDING_RECURRING_KEY = '@pending_recurring';
+const CACHED_INCOME_KEY = '@cached_income';
+const CACHED_RECURRING_KEY = '@cached_recurring';
 
 interface PendingExpense {
   id: string;
@@ -12,6 +16,33 @@ interface PendingExpense {
   paymentMethod: string;
   description?: string;
   date: string;
+  createdAt: string;
+  // Split expense fields
+  isSplit?: boolean;
+  splitType?: 'equal' | 'custom' | 'percentage';
+  participants?: any[];
+  userShare?: number;
+}
+
+interface PendingIncome {
+  id: string;
+  amount: number;
+  source: string;
+  description?: string;
+  date: string;
+  createdAt: string;
+}
+
+interface PendingRecurring {
+  id: string;
+  type: 'expense' | 'income';
+  amount: number;
+  category?: string;
+  source?: string;
+  paymentMethod?: string;
+  description?: string;
+  frequency: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  dayOfMonth?: number;
   createdAt: string;
 }
 
@@ -89,6 +120,11 @@ export const syncPendingExpenses = async (token: string): Promise<{ synced: numb
         paymentMethod: expense.paymentMethod,
         description: expense.description,
         date: expense.date,
+        // Include split expense data if present
+        isSplit: expense.isSplit,
+        splitType: expense.splitType,
+        participants: expense.participants,
+        userShare: expense.userShare,
       });
       if (response.success) {
         successfulCreates.push(expense.id);
@@ -207,11 +243,218 @@ export const getMergedExpenses = async (): Promise<any[]> => {
     description: p.description,
     date: p.date,
     isOffline: true,
+    // Include split expense fields
+    isSplit: p.isSplit,
+    splitType: p.splitType,
+    participants: p.participants,
+    userShare: p.userShare,
   }));
 
   // Combine and sort by date descending
   const all = [...merged, ...offlineExpenses];
   return all.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+};
+
+// ============ INCOME OFFLINE SUPPORT ============
+
+// Save income locally when offline
+export const saveOfflineIncome = async (income: Omit<PendingIncome, 'id' | 'createdAt'>): Promise<PendingIncome> => {
+  const pending = await getPendingIncome();
+  const newIncome: PendingIncome = {
+    ...income,
+    id: `offline_income_${Date.now()}`,
+    createdAt: new Date().toISOString(),
+  };
+  pending.push(newIncome);
+  await AsyncStorage.setItem(PENDING_INCOME_KEY, JSON.stringify(pending));
+  return newIncome;
+};
+
+// Get all pending income
+export const getPendingIncome = async (): Promise<PendingIncome[]> => {
+  const data = await AsyncStorage.getItem(PENDING_INCOME_KEY);
+  return data ? JSON.parse(data) : [];
+};
+
+// Cache income from server
+export const cacheIncome = async (income: any[]): Promise<void> => {
+  await AsyncStorage.setItem(CACHED_INCOME_KEY, JSON.stringify(income));
+};
+
+// Get cached income
+export const getCachedIncome = async (): Promise<any[]> => {
+  const data = await AsyncStorage.getItem(CACHED_INCOME_KEY);
+  return data ? JSON.parse(data) : [];
+};
+
+// Merge cached income with pending offline ones for display
+export const getMergedIncome = async (): Promise<any[]> => {
+  const cached = await getCachedIncome();
+  const pending = await getPendingIncome();
+
+  // Add pending offline income
+  const offlineIncome = pending.map(p => ({
+    _id: p.id,
+    amount: p.amount,
+    source: p.source,
+    description: p.description,
+    date: p.date,
+    isOffline: true,
+  }));
+
+  // Combine and sort by date descending
+  const all = [...cached, ...offlineIncome];
+  return all.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+};
+
+// Sync pending income to server
+export const syncPendingIncome = async (token: string): Promise<{ synced: number; errors: number }> => {
+  let synced = 0;
+  let errors = 0;
+
+  const pendingIncome = await getPendingIncome();
+  const successfulCreates: string[] = [];
+
+  for (const income of pendingIncome) {
+    try {
+      const response: any = await api.createIncome(token, {
+        amount: income.amount,
+        source: income.source,
+        description: income.description,
+        date: income.date,
+      });
+      if (response.success) {
+        successfulCreates.push(income.id);
+        synced++;
+      } else {
+        errors++;
+      }
+    } catch (e) {
+      errors++;
+    }
+  }
+
+  // Remove synced income
+  if (successfulCreates.length > 0) {
+    const remaining = pendingIncome.filter(i => !successfulCreates.includes(i.id));
+    await AsyncStorage.setItem(PENDING_INCOME_KEY, JSON.stringify(remaining));
+  }
+
+  return { synced, errors };
+};
+
+// ============ RECURRING OFFLINE SUPPORT ============
+
+// Save recurring locally when offline
+export const saveOfflineRecurring = async (recurring: Omit<PendingRecurring, 'id' | 'createdAt'>): Promise<PendingRecurring> => {
+  const pending = await getPendingRecurring();
+  const newRecurring: PendingRecurring = {
+    ...recurring,
+    id: `offline_recurring_${Date.now()}`,
+    createdAt: new Date().toISOString(),
+  };
+  pending.push(newRecurring);
+  await AsyncStorage.setItem(PENDING_RECURRING_KEY, JSON.stringify(pending));
+  return newRecurring;
+};
+
+// Get all pending recurring
+export const getPendingRecurring = async (): Promise<PendingRecurring[]> => {
+  const data = await AsyncStorage.getItem(PENDING_RECURRING_KEY);
+  return data ? JSON.parse(data) : [];
+};
+
+// Cache recurring from server
+export const cacheRecurring = async (recurring: any[]): Promise<void> => {
+  await AsyncStorage.setItem(CACHED_RECURRING_KEY, JSON.stringify(recurring));
+};
+
+// Get cached recurring
+export const getCachedRecurring = async (): Promise<any[]> => {
+  const data = await AsyncStorage.getItem(CACHED_RECURRING_KEY);
+  return data ? JSON.parse(data) : [];
+};
+
+// Merge cached recurring with pending offline ones for display
+export const getMergedRecurring = async (): Promise<any[]> => {
+  const cached = await getCachedRecurring();
+  const pending = await getPendingRecurring();
+
+  // Add pending offline recurring
+  const offlineRecurring = pending.map(p => ({
+    _id: p.id,
+    type: p.type,
+    amount: p.amount,
+    category: p.category,
+    source: p.source,
+    description: p.description,
+    frequency: p.frequency,
+    isActive: true,
+    nextDueDate: new Date().toISOString(),
+    isOffline: true,
+  }));
+
+  // Combine
+  return [...cached, ...offlineRecurring];
+};
+
+// Sync pending recurring to server
+export const syncPendingRecurring = async (token: string): Promise<{ synced: number; errors: number }> => {
+  let synced = 0;
+  let errors = 0;
+
+  const pendingRecurring = await getPendingRecurring();
+  const successfulCreates: string[] = [];
+
+  for (const recurring of pendingRecurring) {
+    try {
+      const response: any = await api.createRecurring(token, {
+        type: recurring.type,
+        amount: recurring.amount,
+        category: recurring.category,
+        source: recurring.source,
+        paymentMethod: recurring.paymentMethod,
+        description: recurring.description,
+        frequency: recurring.frequency,
+        dayOfMonth: recurring.dayOfMonth,
+      });
+      if (response.success) {
+        successfulCreates.push(recurring.id);
+        synced++;
+      } else {
+        errors++;
+      }
+    } catch (e) {
+      errors++;
+    }
+  }
+
+  // Remove synced recurring
+  if (successfulCreates.length > 0) {
+    const remaining = pendingRecurring.filter(r => !successfulCreates.includes(r.id));
+    await AsyncStorage.setItem(PENDING_RECURRING_KEY, JSON.stringify(remaining));
+  }
+
+  return { synced, errors };
+};
+
+// Check if there are pending income/recurring
+export const hasPendingIncomeOrRecurring = async (): Promise<boolean> => {
+  const income = await getPendingIncome();
+  const recurring = await getPendingRecurring();
+  return income.length > 0 || recurring.length > 0;
+};
+
+// Sync all pending operations (expenses, income, recurring)
+export const syncAllPending = async (token: string): Promise<{ synced: number; errors: number }> => {
+  const expenseResult = await syncPendingExpenses(token);
+  const incomeResult = await syncPendingIncome(token);
+  const recurringResult = await syncPendingRecurring(token);
+
+  return {
+    synced: expenseResult.synced + incomeResult.synced + recurringResult.synced,
+    errors: expenseResult.errors + incomeResult.errors + recurringResult.errors,
+  };
 };
 
 // Clear all offline data (for logout)
@@ -221,5 +464,9 @@ export const clearOfflineData = async (): Promise<void> => {
     PENDING_DELETES_KEY,
     PENDING_UPDATES_KEY,
     CACHED_EXPENSES_KEY,
+    PENDING_INCOME_KEY,
+    CACHED_INCOME_KEY,
+    PENDING_RECURRING_KEY,
+    CACHED_RECURRING_KEY,
   ]);
 };

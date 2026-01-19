@@ -15,9 +15,9 @@ export default function MainLayout() {
           backgroundColor: theme.colors.surface,
           borderTopColor: theme.colors.border,
           borderTopWidth: 0.5,
-          height: 80,
-          paddingBottom: 20,
-          paddingTop: 6,
+          height: 75,
+          paddingBottom: 16,
+          paddingTop: 8,
           position: 'absolute',
           bottom: 0,
           left: 0,
@@ -27,9 +27,9 @@ export default function MainLayout() {
         tabBarActiveTintColor: theme.colors.primary,
         tabBarInactiveTintColor: theme.colors.textTertiary,
         tabBarLabelStyle: {
-          fontSize: 10,
+          fontSize: 11,
           fontWeight: '600',
-          marginTop: 0,
+          marginTop: 2,
         },
         tabBarHideOnKeyboard: true,
         animation: 'fade',
@@ -47,7 +47,7 @@ export default function MainLayout() {
       <Tabs.Screen
         name="expenses"
         options={{
-          title: 'Transactions',
+          title: 'Activity',
           tabBarIcon: ({ color }) => (
             <MaterialIcons name="swap-vert" size={24} color={color} />
           ),
@@ -84,18 +84,6 @@ export default function MainLayout() {
       />
       <Tabs.Screen
         name="edit-expense"
-        options={{
-          href: null,
-        }}
-      />
-      <Tabs.Screen
-        name="add-expense"
-        options={{
-          href: null,
-        }}
-      />
-      <Tabs.Screen
-        name="add-income"
         options={{
           href: null,
         }}

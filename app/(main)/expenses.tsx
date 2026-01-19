@@ -133,14 +133,11 @@ export default function ExpensesScreen() {
                 // Handle both 'data' and 'income' keys for compatibility
                 const incomeData = incomeRes.data || incomeRes.income;
                 if (incomeRes.success && Array.isArray(incomeData)) {
-                    console.log('✅ Income loaded:', incomeData.length, 'entries');
                     setIncomeList(incomeData);
                 } else {
-                    console.log('⚠️ Income fetch - no data:', incomeRes);
                 }
             } catch (error: any) {
                 // Network error - will use cached + offline data
-                console.log('Network error, using cached data:', error.message);
             }
 
             // Always get merged data (cached server + offline pending)
