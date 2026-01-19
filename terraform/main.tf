@@ -1,7 +1,7 @@
 # ============================================================
-# EC2 + DOCKER - SPENDWISE SERVER
-# Simple deployment: Pull Docker image and run
-# Setup time: ~2-3 minutes
+# EC2 + MINIKUBE (KUBERNETES) - SPENDWISE SERVER
+# Fully automated Kubernetes deployment
+# Setup time: ~3-5 minutes
 # ============================================================
 
 terraform {
@@ -33,19 +33,19 @@ variable "dockerhub_username" {
 variable "mongodb_uri" {
   description = "MongoDB connection string"
   type        = string
-  default     = ""  # Will use environment variable or default
+  default     = "mongodb+srv://yashaga0204_db_user:4VTmqvGDWycaRZJ5@cluster0.ergxeka.mongodb.net/spendwise?retryWrites=true&w=majority"
 }
 
 variable "jwt_secret" {
   description = "JWT Secret for authentication"
   type        = string
-  default     = "spendwise-jwt-secret-2026"
+  default     = "pocketexpense2025Sdjfndfdl@Atlsddfnsdflns75365431131zsdnakd556"
 }
 
-# EC2 Instance with Docker
-resource "aws_instance" "spendwise_server" {
+# EC2 Instance with Minikube
+resource "aws_instance" "spendwise_k8s" {
   ami           = "ami-0f5ee92e2d63afc18"  # Ubuntu 22.04 LTS in ap-south-1
-  instance_type = "t2.medium"
+  instance_type = "t2.medium"               # 2 vCPU, 4GB RAM for Minikube
   key_name      = var.key_name
 
   user_data = <<-EOF
@@ -53,79 +53,214 @@ resource "aws_instance" "spendwise_server" {
               set -e
               exec > /var/log/user-data.log 2>&1
               
-              echo "=== Starting Spendwise Server Setup ==="
+              echo "=== Starting Kubernetes Setup ==="
               
+              # -----------------------------------------
               # Step 1: Install Docker
+              # -----------------------------------------
               echo "Installing Docker..."
               apt update -y
-              apt install -y docker.io curl
+              apt install -y docker.io curl conntrack
               systemctl start docker
               systemctl enable docker
               usermod -aG docker ubuntu
               
-              # Step 2: Pull Docker image
-              echo "Pulling Docker image..."
-              docker pull ${var.dockerhub_username}/spendwise-server:latest
+              # -----------------------------------------
+              # Step 2: Install kubectl
+              # -----------------------------------------
+              echo "Installing kubectl..."
+              curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+              install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+              rm kubectl
               
-              # Step 3: Run the container
-              echo "Starting Spendwise server..."
-              docker run -d \
-                --name spendwise-server \
-                --restart always \
-                -p 3000:3000 \
-                -e NODE_ENV=production \
-                -e PORT=3000 \
-                -e JWT_SECRET="${var.jwt_secret}" \
-                -e MONGODB_URI="${var.mongodb_uri}" \
-                ${var.dockerhub_username}/spendwise-server:latest
+              # -----------------------------------------
+              # Step 3: Install Minikube
+              # -----------------------------------------
+              echo "Installing Minikube..."
+              curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+              install minikube-linux-amd64 /usr/local/bin/minikube
+              rm minikube-linux-amd64
               
-              # Step 4: Create helper scripts
+              # -----------------------------------------
+              # Step 4: Start Minikube (as ubuntu user)
+              # -----------------------------------------
+              echo "Starting Minikube..."
+              sudo -u ubuntu bash -c 'minikube start --driver=docker --force'
+              
+              # Wait for Minikube to be ready
+              sleep 30
+              
+              # -----------------------------------------
+              # Step 5: Create Kubernetes Resources
+              # -----------------------------------------
+              echo "Creating K8s namespace..."
+              sudo -u ubuntu kubectl create namespace spendwise || true
+              
+              # Create Secret for sensitive data
+              echo "Creating K8s secrets..."
+              sudo -u ubuntu kubectl create secret generic spendwise-secrets \
+                --namespace=spendwise \
+                --from-literal=mongodb-uri='${var.mongodb_uri}' \
+                --from-literal=jwt-secret='${var.jwt_secret}' \
+                --dry-run=client -o yaml | sudo -u ubuntu kubectl apply -f -
+              
+              # Create Deployment
+              echo "Creating K8s deployment..."
+              sudo -u ubuntu bash -c 'cat << DEPLOY_EOF | kubectl apply -f -
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: spendwise-server
+                namespace: spendwise
+                labels:
+                  app: spendwise
+              spec:
+                replicas: 2
+                selector:
+                  matchLabels:
+                    app: spendwise
+                strategy:
+                  type: RollingUpdate
+                  rollingUpdate:
+                    maxSurge: 1
+                    maxUnavailable: 0
+                template:
+                  metadata:
+                    labels:
+                      app: spendwise
+                  spec:
+                    containers:
+                    - name: server
+                      image: ${var.dockerhub_username}/spendwise-server:latest
+                      imagePullPolicy: Always
+                      ports:
+                      - containerPort: 3000
+                      env:
+                      - name: NODE_ENV
+                        value: "production"
+                      - name: PORT
+                        value: "3000"
+                      - name: MONGODB_URI
+                        valueFrom:
+                          secretKeyRef:
+                            name: spendwise-secrets
+                            key: mongodb-uri
+                      - name: JWT_SECRET
+                        valueFrom:
+                          secretKeyRef:
+                            name: spendwise-secrets
+                            key: jwt-secret
+                      resources:
+                        requests:
+                          memory: "128Mi"
+                          cpu: "100m"
+                        limits:
+                          memory: "512Mi"
+                          cpu: "500m"
+                      livenessProbe:
+                        httpGet:
+                          path: /api/health
+                          port: 3000
+                        initialDelaySeconds: 30
+                        periodSeconds: 10
+                      readinessProbe:
+                        httpGet:
+                          path: /api/health
+                          port: 3000
+                        initialDelaySeconds: 5
+                        periodSeconds: 5
+              DEPLOY_EOF'
+              
+              # Create Service
+              echo "Creating K8s service..."
+              sudo -u ubuntu bash -c 'cat << SVC_EOF | kubectl apply -f -
+              apiVersion: v1
+              kind: Service
+              metadata:
+                name: spendwise-server
+                namespace: spendwise
+              spec:
+                type: NodePort
+                selector:
+                  app: spendwise
+                ports:
+                - protocol: TCP
+                  port: 3000
+                  targetPort: 3000
+                  nodePort: 30000
+              SVC_EOF'
+              
+              # Wait for pods to be ready
+              echo "Waiting for pods to be ready..."
+              sudo -u ubuntu kubectl rollout status deployment/spendwise-server -n spendwise --timeout=180s || true
+              
+              # -----------------------------------------
+              # Step 6: Setup Port Forwarding Service
+              # -----------------------------------------
+              echo "Setting up port forwarding..."
+              cat << 'SYSTEMD_EOF' > /etc/systemd/system/k8s-port-forward.service
+              [Unit]
+              Description=Kubernetes Port Forward for Spendwise
+              After=network.target
+              
+              [Service]
+              Type=simple
+              User=ubuntu
+              ExecStartPre=/bin/sleep 10
+              ExecStart=/usr/local/bin/kubectl port-forward --address 0.0.0.0 svc/spendwise-server 3000:3000 -n spendwise
+              Restart=always
+              RestartSec=10
+              
+              [Install]
+              WantedBy=multi-user.target
+              SYSTEMD_EOF
+              
+              systemctl daemon-reload
+              systemctl enable k8s-port-forward
+              systemctl start k8s-port-forward
+              
+              # -----------------------------------------
+              # Step 7: Create helper scripts
+              # -----------------------------------------
               echo "Creating helper scripts..."
               
               # Status script
               cat << 'STATUS_EOF' > /home/ubuntu/status.sh
               #!/bin/bash
-              echo "=== Docker Containers ==="
-              docker ps -a
+              echo "=== Minikube Status ==="
+              minikube status
               echo ""
-              echo "=== Container Logs ==="
-              docker logs --tail 20 spendwise-server
+              echo "=== Pods ==="
+              kubectl get pods -n spendwise
+              echo ""
+              echo "=== Services ==="
+              kubectl get svc -n spendwise
+              echo ""
+              echo "=== Deployment ==="
+              kubectl get deployment -n spendwise
               STATUS_EOF
               chmod +x /home/ubuntu/status.sh
               
-              # Restart script
-              cat << 'RESTART_EOF' > /home/ubuntu/restart.sh
+              # Redeploy script (for CD pipeline)
+              cat << 'REDEPLOY_EOF' > /home/ubuntu/redeploy.sh
               #!/bin/bash
-              docker restart spendwise-server
-              echo "Server restarted!"
-              RESTART_EOF
-              chmod +x /home/ubuntu/restart.sh
+              echo "Restarting deployment to pull latest image..."
+              kubectl rollout restart deployment/spendwise-server -n spendwise
+              kubectl rollout status deployment/spendwise-server -n spendwise --timeout=120s
+              echo "Redeployment complete!"
+              REDEPLOY_EOF
+              chmod +x /home/ubuntu/redeploy.sh
               
-              # Update/redeploy script
-              cat << 'UPDATE_EOF' > /home/ubuntu/update.sh
+              # Logs script
+              cat << 'LOGS_EOF' > /home/ubuntu/logs.sh
               #!/bin/bash
-              echo "Pulling latest image..."
-              docker pull thetallinnov8r/spendwise-server:latest
-              docker stop spendwise-server
-              docker rm spendwise-server
-              docker run -d \
-                --name spendwise-server \
-                --restart always \
-                -p 3000:3000 \
-                -e NODE_ENV=production \
-                -e PORT=3000 \
-                -e JWT_SECRET="spendwise-jwt-secret-2026" \
-                thetallinnov8r/spendwise-server:latest
-              echo "Updated to latest version!"
-              UPDATE_EOF
-              chmod +x /home/ubuntu/update.sh
+              kubectl logs -l app=spendwise -n spendwise --tail=50
+              LOGS_EOF
+              chmod +x /home/ubuntu/logs.sh
               
               chown ubuntu:ubuntu /home/ubuntu/*.sh
               
-              # Wait for container to start
-              sleep 5
-              
-              echo "=== Setup Complete! ==="
+              echo "=== Kubernetes Setup Complete! ==="
               PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
               echo "App URL: http://$PUBLIC_IP:3000"
               echo "Health Check: http://$PUBLIC_IP:3000/api/health"
@@ -134,7 +269,7 @@ resource "aws_instance" "spendwise_server" {
   vpc_security_group_ids = [aws_security_group.spendwise_sg.id]
 
   tags = {
-    Name        = "spendwise-server"
+    Name        = "spendwise-k8s-server"
     Project     = "Spendwise"
     Environment = "production"
     ManagedBy   = "Terraform"
@@ -143,8 +278,8 @@ resource "aws_instance" "spendwise_server" {
 
 # Security Group
 resource "aws_security_group" "spendwise_sg" {
-  name        = "spendwise-server-sg"
-  description = "Security group for Spendwise server"
+  name        = "spendwise-k8s-sg"
+  description = "Security group for Spendwise K8s server"
 
   # SSH access
   ingress {
@@ -164,6 +299,15 @@ resource "aws_security_group" "spendwise_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
+  # K8s NodePort range
+  ingress {
+    description = "K8s NodePort"
+    from_port   = 30000
+    to_port     = 32767
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   # Outbound traffic
   egress {
     from_port   = 0
@@ -173,7 +317,7 @@ resource "aws_security_group" "spendwise_sg" {
   }
 
   tags = {
-    Name    = "spendwise-server-sg"
+    Name    = "spendwise-k8s-sg"
     Project = "Spendwise"
   }
 }
@@ -181,25 +325,30 @@ resource "aws_security_group" "spendwise_sg" {
 # Outputs
 output "instance_id" {
   description = "EC2 Instance ID"
-  value       = aws_instance.spendwise_server.id
+  value       = aws_instance.spendwise_k8s.id
 }
 
 output "public_ip" {
-  description = "Public IP of the server"
-  value       = aws_instance.spendwise_server.public_ip
+  description = "Public IP of the K8s server"
+  value       = aws_instance.spendwise_k8s.public_ip
 }
 
 output "app_url" {
   description = "Application URL"
-  value       = "http://${aws_instance.spendwise_server.public_ip}:3000"
+  value       = "http://${aws_instance.spendwise_k8s.public_ip}:3000"
 }
 
 output "health_check" {
   description = "Health check URL"
-  value       = "http://${aws_instance.spendwise_server.public_ip}:3000/api/health"
+  value       = "http://${aws_instance.spendwise_k8s.public_ip}:3000/api/health"
 }
 
 output "ssh_command" {
   description = "SSH command to connect"
-  value       = "ssh -i ~/.ssh/${var.key_name}.pem ubuntu@${aws_instance.spendwise_server.public_ip}"
+  value       = "ssh -i ~/.ssh/${var.key_name}.pem ubuntu@${aws_instance.spendwise_k8s.public_ip}"
+}
+
+output "kubectl_status" {
+  description = "Command to check K8s status"
+  value       = "ssh -i ~/.ssh/${var.key_name}.pem ubuntu@${aws_instance.spendwise_k8s.public_ip} './status.sh'"
 }
