@@ -1,0 +1,19 @@
+# ============================================================
+# KUBERNETES CONFIGMAP - Spendwise Configuration
+# Purpose: Store non-sensitive configuration data
+#
+# Why ConfigMaps:
+# - Separates config from code (12-factor app)
+# - Easy to update without rebuilding image
+# - Environment-specific settings
+# ============================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spendwise-config
+  labels:
+    app: spendwise
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  # Add other non-sensitive config here

@@ -1,0 +1,30 @@
+# ============================================================
+# KUBERNETES SERVICE - Spendwise Server
+# Purpose: Expose the application within/outside the cluster
+#
+# Service Types:
+# - ClusterIP: Internal only (default)
+# - NodePort: External via node ports
+# - LoadBalancer: External via cloud load balancer
+# ============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: spendwise-server
+  labels:
+    app: spendwise
+    component: server
+spec:
+  # Use LoadBalancer for cloud deployments (AWS/GCP/Azure)
+  # Use NodePort for local testing (minikube/kind)
+  type: LoadBalancer
+  
+  selector:
+    app: spendwise
+    component: server
+  
+  ports:
+  - name: http
+    port: 3000
+    targetPort: 3000
+    protocol: TCP

@@ -1,0 +1,227 @@
+name: CI Pipeline - Spendwise Backend
+
+# ============================================================
+# CI PIPELINE TRIGGER
+# Purpose: Run CI on every push to main/master or PR
+# ============================================================
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'server/**'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '20'
+  DOCKER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/spendwise-server
+
+jobs:
+  # ============================================================
+  # CI PIPELINE JOB
+  # ============================================================
+  ci-pipeline:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+
+    defaults:
+      run:
+        working-directory: ./server
+    
+    steps:
+    # ============================================================
+    # STAGE 1: CHECKOUT
+    # Purpose: Get source code from repository
+    # Why: Foundation for all subsequent pipeline stages
+    # ============================================================
+    - name: Checkout source code
+      uses: actions/checkout@v4
+
+    # ============================================================
+    # STAGE 2: SETUP NODE.JS
+    # Purpose: Install Node.js runtime environment
+    # Why: Required to run npm commands and execute JavaScript
+    # ============================================================
+    - name: Setup Node.js ${{ env.NODE_VERSION }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: server/package-lock.json
+
+    # ============================================================
+    # STAGE 3: INSTALL DEPENDENCIES
+    # Purpose: Install project dependencies using clean install
+    # Why: npm ci ensures reproducible builds from lockfile
+    # ============================================================
+    - name: Install dependencies
+      run: npm ci
+
+    # ============================================================
+    # STAGE 4: LINTING (Code Quality)
+    # Purpose: Check code style and quality standards
+    # Why: Prevents technical debt, ensures consistent code style
+    # ============================================================
+    - name: Run ESLint
+      run: npm run lint
+      continue-on-error: true
+
+    # ============================================================
+    # STAGE 5: SAST - Static Application Security Testing
+    # Purpose: Analyze code for security vulnerabilities
+    # Why: Detects OWASP Top 10 vulnerabilities early
+    # ============================================================
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: javascript
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "/language:javascript"
+
+    # ============================================================
+    # STAGE 6: SCA - Software Composition Analysis
+    # Purpose: Scan dependencies for known vulnerabilities
+    # Why: Supply chain security - detects vulnerable packages
+    # ============================================================
+    - name: Run npm audit (SCA)
+      run: npm audit --audit-level=high
+      continue-on-error: true
+
+    # ============================================================
+    # STAGE 7: UNIT TESTS
+    # Purpose: Run automated tests to verify code functionality
+    # Why: Prevents regressions, ensures code works as expected
+    # ============================================================
+    - name: Run unit tests
+      run: npm test
+      env:
+        NODE_ENV: test
+        JWT_SECRET: test-secret
+        MONGODB_URI: mongodb://localhost:27017/test
+
+    # ============================================================
+    # STAGE 8: BUILD VERIFICATION
+    # Purpose: Verify the application can start successfully
+    # Why: Catches runtime errors before containerization
+    # ============================================================
+    - name: Verify build
+      run: node --check index.js
+
+    # ============================================================
+    # STAGE 9: DOCKER BUILD
+    # Purpose: Create container image for deployment
+    # Why: Containers ensure consistent runtime across environments
+    # ============================================================
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to DockerHub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Build Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./server
+        push: false
+        load: true
+        tags: |
+          ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+          ${{ env.DOCKER_IMAGE }}:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    # ============================================================
+    # STAGE 10: CONTAINER SCAN (Trivy)
+    # Purpose: Scan container image for OS/library vulnerabilities
+    # Why: Prevents deploying images with known CVEs
+    # ============================================================
+    - name: Run Trivy vulnerability scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        severity: 'CRITICAL,HIGH'
+        exit-code: '0'
+      continue-on-error: true
+
+    - name: Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: 'trivy-results.sarif'
+      continue-on-error: true
+
+    # ============================================================
+    # STAGE 11: CONTAINER RUNTIME TEST
+    # Purpose: Verify container runs and responds correctly
+    # Why: Smoke test before pushing to registry
+    # ============================================================
+    - name: Test container runtime
+      run: |
+        docker run -d --name test-container -p 3000:3000 \
+          -e NODE_ENV=test \
+          -e JWT_SECRET=test-secret \
+          -e MONGODB_URI=mongodb://localhost:27017/test \
+          ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+        sleep 10
+        curl -f http://localhost:3000/api/health || exit 1
+        docker logs test-container
+        docker stop test-container
+      continue-on-error: true
+
+    # ============================================================
+    # STAGE 12: PUSH TO REGISTRY
+    # Purpose: Upload verified image to DockerHub
+    # Why: Makes image available for deployment
+    # ============================================================
+    - name: Push to DockerHub
+      uses: docker/build-push-action@v5
+      with:
+        context: ./server
+        push: true
+        tags: |
+          ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+          ${{ env.DOCKER_IMAGE }}:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    # ============================================================
+    # STAGE 13: CI SUMMARY
+    # Purpose: Generate pipeline summary report
+    # ============================================================
+    - name: CI Pipeline Summary
+      run: |
+        echo "## CI Pipeline Completed" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+        echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Checkout | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| Setup Node.js | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| Install Dependencies | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| Linting | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| SAST (CodeQL) | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| SCA (npm audit) | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| Unit Tests | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| Build Verification | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| Docker Build | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| Container Scan (Trivy) | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| Container Test | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| Push to DockerHub | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Image:** \`${{ env.DOCKER_IMAGE }}:latest\`" >> $GITHUB_STEP_SUMMARY

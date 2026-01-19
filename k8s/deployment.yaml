@@ -1,0 +1,97 @@
+# ============================================================
+# KUBERNETES DEPLOYMENT - Spendwise Server
+# Purpose: Define the desired state for application pods
+#
+# Key Features:
+# - 2 replicas for high availability
+# - Resource limits for cluster stability
+# - Health checks for self-healing
+# - Rolling update strategy for zero-downtime deploys
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spendwise-server
+  labels:
+    app: spendwise
+    component: server
+    version: "1.0"
+spec:
+  replicas: 2
+  
+  # Rolling update strategy for zero-downtime deployments
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  
+  selector:
+    matchLabels:
+      app: spendwise
+      component: server
+  
+  template:
+    metadata:
+      labels:
+        app: spendwise
+        component: server
+    spec:
+      # Security: Don't run as root
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+      
+      containers:
+      - name: server
+        image: IMAGE_TAG  # Will be replaced by CI/CD
+        imagePullPolicy: Always
+        
+        ports:
+        - containerPort: 3000
+          name: http
+        
+        # Environment variables from ConfigMap and Secrets
+        envFrom:
+        - configMapRef:
+            name: spendwise-config
+        - secretRef:
+            name: spendwise-secrets
+        
+        # Resource limits for cluster stability
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        
+        # Liveness probe: Restart container if unhealthy
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        # Readiness probe: Don't send traffic until ready
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        
+        # Security context for container
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+              - ALL

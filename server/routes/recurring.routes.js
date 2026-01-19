@@ -207,6 +207,22 @@ router.post('/:id/generate', async (req, res) => {
             });
         }
 
+        // Check if already generated today (prevent duplicates)
+        if (recurring.lastGeneratedDate) {
+            const lastGen = new Date(recurring.lastGeneratedDate);
+            const today = new Date();
+            if (
+                lastGen.getFullYear() === today.getFullYear() &&
+                lastGen.getMonth() === today.getMonth() &&
+                lastGen.getDate() === today.getDate()
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Already generated today. Next generation available tomorrow.',
+                });
+            }
+        }
+
         let generated;
 
         if (recurring.type === 'expense') {

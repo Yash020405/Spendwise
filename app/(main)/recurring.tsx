@@ -10,6 +10,7 @@ import {
     TextInput,
     Alert,
 } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
@@ -78,6 +79,8 @@ export default function RecurringScreen() {
     const [formDescription, setFormDescription] = useState('');
     const [formFrequency, setFormFrequency] = useState('monthly');
     const [formDayOfMonth, setFormDayOfMonth] = useState('1');
+    const [formStartDate, setFormStartDate] = useState(new Date());
+    const [showStartPicker, setShowStartPicker] = useState(false);
 
     useFocusEffect(
         useCallback(() => {
@@ -209,6 +212,7 @@ export default function RecurringScreen() {
                 description: formDescription || undefined,
                 frequency: formFrequency as any,
                 dayOfMonth: formFrequency === 'monthly' ? parseInt(formDayOfMonth) : undefined,
+                startDate: formStartDate.toISOString(),
             };
 
             try {
@@ -244,6 +248,7 @@ export default function RecurringScreen() {
         setFormDescription('');
         setFormFrequency('monthly');
         setFormDayOfMonth('1');
+        setFormStartDate(new Date());
     };
 
     const getItemConfig = (item: RecurringItem) => {
@@ -430,6 +435,30 @@ export default function RecurringScreen() {
                                     </TouchableOpacity>
                                 ))}
                             </ScrollView>
+
+                            {/* Start Date */}
+                            <Text style={[styles.label, { color: theme.colors.textSecondary }]}>Start Date</Text>
+                            <TouchableOpacity
+                                style={[styles.input, { backgroundColor: theme.colors.surface, flexDirection: 'row', alignItems: 'center' }]}
+                                onPress={() => setShowStartPicker(true)}
+                            >
+                                <MaterialIcons name="calendar-today" size={20} color={theme.colors.primary} style={{ marginRight: 10 }} />
+                                <Text style={{ color: theme.colors.text, fontSize: 16 }}>
+                                    {formStartDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                </Text>
+                            </TouchableOpacity>
+
+                            {showStartPicker && (
+                                <DateTimePicker
+                                    value={formStartDate}
+                                    mode="date"
+                                    display="default"
+                                    onChange={(event, date) => {
+                                        setShowStartPicker(false);
+                                        if (date) setFormStartDate(date);
+                                    }}
+                                />
+                            )}
 
                             {/* Frequency */}
                             <Text style={[styles.label, { color: theme.colors.textSecondary }]}>Frequency</Text>

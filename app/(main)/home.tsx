@@ -181,8 +181,29 @@ export default function HomeScreen() {
     useCallback(() => {
       fetchData();
       checkAndSyncPending();
+      processRecurringTransactions();
     }, [])
   );
+
+  // Auto-process due recurring transactions
+  const processRecurringTransactions = async () => {
+    try {
+      const token = await AsyncStorage.getItem('@auth_token');
+      if (!token) return;
+
+      const result: any = await api.processRecurring(token);
+      if (result.success && result.results?.processed > 0) {
+        showToast({
+          message: `Generated ${result.results.processed} recurring transaction(s)`,
+          type: 'success'
+        });
+        // Refresh data to show new transactions
+        fetchData();
+      }
+    } catch (e) {
+      // Silent fail - not critical
+    }
+  };
 
   // Check for pending offline expenses and sync them
   const checkAndSyncPending = async () => {

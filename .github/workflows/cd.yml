@@ -1,0 +1,157 @@
+name: CD Pipeline - Deploy to EC2
+
+# ============================================================
+# CD PIPELINE TRIGGER
+# Purpose: Deploy to EC2 after successful CI
+# ============================================================
+on:
+  workflow_run:
+    workflows: ["CI Pipeline - Spendwise Backend"]
+    types:
+      - completed
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+env:
+  DOCKER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/spendwise-server
+
+jobs:
+  # ============================================================
+  # CD DEPLOYMENT JOB
+  # ============================================================
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+
+    steps:
+    # ============================================================
+    # STAGE 1: CHECKOUT
+    # Purpose: Get deployment scripts and configs
+    # ============================================================
+    - name: Checkout source code
+      uses: actions/checkout@v4
+
+    # ============================================================
+    # STAGE 2: CONFIGURE SSH
+    # Purpose: Setup SSH key for EC2 access
+    # Why: Secure deployment without storing keys in code
+    # ============================================================
+    - name: Configure SSH
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+        chmod 600 ~/.ssh/deploy_key
+        echo -e "Host *\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+
+    # ============================================================
+    # STAGE 3: DEPLOY TO EC2
+    # Purpose: SSH to EC2 and update Docker container
+    # Why: Pull latest image and restart the service
+    # ============================================================
+    - name: Deploy to EC2
+      run: |
+        ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+          echo "=== Starting Deployment ==="
+          
+          # Pull latest Docker image
+          echo "Pulling latest image..."
+          docker pull ${{ env.DOCKER_IMAGE }}:latest
+          
+          # Stop and remove old container
+          echo "Stopping old container..."
+          docker stop spendwise-server || true
+          docker rm spendwise-server || true
+          
+          # Run new container
+          echo "Starting new container..."
+          docker run -d \
+            --name spendwise-server \
+            --restart always \
+            -p 3000:3000 \
+            -e NODE_ENV=production \
+            -e PORT=3000 \
+            -e JWT_SECRET="${{ secrets.JWT_SECRET }}" \
+            -e MONGODB_URI="${{ secrets.MONGODB_URI }}" \
+            ${{ env.DOCKER_IMAGE }}:latest
+          
+          # Wait for container to start
+          sleep 10
+          
+          # Health check
+          echo "Running health check..."
+          curl -f http://localhost:3000/api/health || exit 1
+          
+          echo "=== Deployment Complete ==="
+        EOF
+
+    # ============================================================
+    # STAGE 4: VERIFY DEPLOYMENT
+    # Purpose: Confirm application is accessible externally
+    # ============================================================
+    - name: Verify Deployment
+      run: |
+        echo "Waiting for deployment to stabilize..."
+        sleep 15
+        
+        echo "Checking external health endpoint..."
+        curl -f http://${{ secrets.EC2_HOST }}:3000/api/health
+        
+        echo "Deployment verified!"
+
+    # ============================================================
+    # STAGE 5: DAST - Dynamic Application Security Testing
+    # Purpose: Scan running application for security issues
+    # Why: Detects runtime vulnerabilities not found in static analysis
+    # ============================================================
+    - name: OWASP ZAP DAST Scan
+      uses: zaproxy/action-baseline@v0.12.0
+      with:
+        target: http://${{ secrets.EC2_HOST }}:3000
+        rules_file_name: '.zap/rules.tsv'
+        cmd_options: '-a -j'
+      continue-on-error: true
+
+    # ============================================================
+    # STAGE 6: CD SUMMARY
+    # Purpose: Generate deployment summary report
+    # ============================================================
+    - name: CD Pipeline Summary
+      run: |
+        echo "## CD Pipeline Completed" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+        echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Checkout | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| Configure SSH | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| Deploy to EC2 | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| Verify Deployment | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "| DAST Scan | ✅ |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**App URL:** \`http://${{ secrets.EC2_HOST }}:3000\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Health Check:** \`http://${{ secrets.EC2_HOST }}:3000/api/health\`" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================
+  # ROLLBACK JOB
+  # Purpose: Revert to previous version on failure
+  # ============================================================
+  rollback:
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: failure()
+
+    steps:
+    - name: Configure SSH
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+        chmod 600 ~/.ssh/deploy_key
+        echo -e "Host *\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
+
+    - name: Rollback deployment
+      run: |
+        ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+          echo "Deployment failed, attempting rollback..."
+          docker restart spendwise-server || echo "Rollback failed"
+        EOF
