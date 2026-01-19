@@ -2,16 +2,9 @@ name: CD Pipeline - Deploy to EC2
 
 # ============================================================
 # CD PIPELINE TRIGGER
-# Purpose: Deploy to EC2 after successful CI
+# Purpose: Deploy to EC2 (Manual trigger only for now)
 # ============================================================
 on:
-  workflow_run:
-    workflows: ["CI Pipeline - Spendwise Backend"]
-    types:
-      - completed
-    branches:
-      - main
-      - master
   workflow_dispatch:
 
 env:
@@ -23,7 +16,6 @@ jobs:
   # ============================================================
   deploy:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
 
     steps:
     # ============================================================
@@ -130,28 +122,3 @@ jobs:
         echo "| DAST Scan | ✅ |" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "**App URL:** \`http://${{ secrets.EC2_HOST }}:3000\`" >> $GITHUB_STEP_SUMMARY
-        echo "**Health Check:** \`http://${{ secrets.EC2_HOST }}:3000/api/health\`" >> $GITHUB_STEP_SUMMARY
-
-  # ============================================================
-  # ROLLBACK JOB
-  # Purpose: Revert to previous version on failure
-  # ============================================================
-  rollback:
-    runs-on: ubuntu-latest
-    needs: deploy
-    if: failure()
-
-    steps:
-    - name: Configure SSH
-      run: |
-        mkdir -p ~/.ssh
-        echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
-        chmod 600 ~/.ssh/deploy_key
-        echo -e "Host *\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
-
-    - name: Rollback deployment
-      run: |
-        ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
-          echo "Deployment failed, attempting rollback..."
-          docker restart spendwise-server || echo "Rollback failed"
-        EOF

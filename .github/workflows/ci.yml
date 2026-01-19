@@ -2,20 +2,15 @@ name: CI Pipeline - Spendwise Backend
 
 # ============================================================
 # CI PIPELINE TRIGGER
-# Purpose: Run CI on every push to main/master or PR
+# Purpose: Run CI on every push to main or PR
 # ============================================================
 on:
   push:
     branches:
       - main
-      - master
-    paths:
-      - 'server/**'
-      - '.github/workflows/ci.yml'
   pull_request:
     branches:
       - main
-      - master
   workflow_dispatch:
 
 env:
