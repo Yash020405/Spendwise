@@ -24,7 +24,7 @@ During the initial development phase, the deployment workflow was entirely manua
 6. Pull the new image and restart containers
 7. Verify the deployment works
 
-This process was **error-prone**, **time-consuming** (~20-30 minutes per deployment), and **inconsistent**. There was no automated security scanning, meaning vulnerabilities could easily slip into production. Additionally, there was no automated rollback mechanism—if a deployment failed, recovery required manual intervention.
+This process was **error-prone**, **time-consuming** (~20-30 minutes per deployment), and **inconsistent**. There was no automated security scanning, meaning vulnerabilities could easily slip into production. Additionally, there was no automated rollback mechanism if a deployment failed, recovery required manual intervention.
 
 ### The Solution
 
@@ -57,17 +57,17 @@ Spendwise is a personal finance management application that enables users to:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│                          CLIENT LAYER                                   │
+│                          CLIENT LAYER                                  │
 ├────────────────────────────────────────────────────────────────────────┤
 │  React Native Mobile App (iOS/Android)                                 │
-│  - Expo framework                                                       │
+│  - Expo framework                                                      │
 │  - Zustand state management                                            │
 │  - AsyncStorage for offline support                                    │
 └──────────────────────────────┬─────────────────────────────────────────┘
                                │ HTTPS
                                ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│                          API LAYER                                      │
+│                          API LAYER                                     │
 ├────────────────────────────────────────────────────────────────────────┤
 │  Node.js + Express.js (v20)                                            │
 │  ├── /api/auth      → Authentication (register, login)                 │
@@ -82,11 +82,11 @@ Spendwise is a personal finance management application that enables users to:
                                │
                                ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│                          DATA LAYER                                     │
+│                          DATA LAYER                                    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  MongoDB Atlas (Cloud Database)                                        │
-│  Collections: Users, Expenses, Income, Budgets, Categories,           │
-│               RecurringTransactions                                     │
+│  Collections: Users, Expenses, Income, Budgets, Categories,            │
+│               RecurringTransactions                                    │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -125,126 +125,126 @@ The complete pipeline flow from code push to production deployment:
                                   │
                                   │ git push to main
                                   ▼
-                        ┌─────────────────┐
-                        │ GitHub Repository│
-                        └────────┬────────┘
+                        ┌───────────────────┐
+                        │ GitHub Repository │
+                        └────────┬──────────┘
                                  │ triggers
                                  ▼
 ╔══════════════════════════════════════════════════════════════════════════╗
-║                        CI PIPELINE (ci.yml)                               ║
-║                        Triggered on: push/PR to main                      ║
+║                        CI PIPELINE (ci.yml)                              ║
+║                        Triggered on: push/PR to main                     ║
 ╠══════════════════════════════════════════════════════════════════════════╣
 ║                                                                          ║
-║  ┌─────────────────────────────────────────────────────────────────────┐║
-║  │              STAGE 1-3: SECURITY GATES (Parallel)                    │║
-║  ├──────────────────┬──────────────────┬───────────────────────────────┤║
-║  │  Code Quality    │   SAST Scan      │   SCA Scan                    │║
-║  │  ─────────────   │   ──────────     │   ─────────                   │║
-║  │  • ESLint        │   • CodeQL v4    │   • npm audit                 │║
-║  │  • Code style    │   • Injection    │   • Known CVEs                │║
-║  │  • Best practices│   • XSS, SSRF    │   • Dependency vulns          │║
-║  └────────┬─────────┴────────┬─────────┴─────────┬─────────────────────┘║
+║  ┌─────────────────────────────────────────────────────────────────────┐ ║
+║  │              STAGE 1-3: SECURITY GATES (Parallel)                   │ ║
+║  ├──────────────────┬──────────────────┬───────────────────────────────┤ ║
+║  │  Code Quality    │   SAST Scan      │   SCA Scan                    │ ║
+║  │  ─────────────   │   ──────────     │   ─────────                   │ ║
+║  │  • ESLint        │   • CodeQL v4    │   • npm audit                 │ ║
+║  │  • Code style    │   • Injection    │   • Known CVEs                │ ║
+║  │  • Best practices│   • XSS, SSRF    │   • Dependency vulns          │ ║
+║  └────────┬─────────┴────────┬─────────┴─────────┬─────────────────────┘ ║
 ║           └──────────────────┼───────────────────┘                       ║
 ║                              ▼                                           ║
-║  ┌─────────────────────────────────────────────────────────────────────┐║
-║  │              STAGE 4: BUILD & TEST                                   │║
-║  │  ───────────────────────────────────────────────────────────────────│║
-║  │  • npm ci (clean install)                                           │║
-║  │  • 24+ Unit Tests (Jest)                                            │║
-║  │  • Syntax validation (node --check)                                 │║
-║  └────────────────────────────┬────────────────────────────────────────┘║
+║  ┌─────────────────────────────────────────────────────────────────────┐ ║
+║  │              STAGE 4: BUILD & TEST                                  │ ║
+║  │  ───────────────────────────────────────────────────────────────────│ ║
+║  │  • npm ci (clean install)                                           │ ║
+║  │  • 24+ Unit Tests (Jest)                                            │ ║
+║  │  • Syntax validation (node --check)                                 │ ║
+║  └────────────────────────────┬────────────────────────────────────────┘ ║
 ║                               ▼                                          ║
-║  ┌─────────────────────────────────────────────────────────────────────┐║
-║  │              STAGE 5: CONTAINER BUILD                                │║
-║  │  ───────────────────────────────────────────────────────────────────│║
-║  │  • Multi-stage Docker build                                         │║
-║  │  • Container startup test                                           │║
-║  │  • Health endpoint verification                                     │║
-║  │  • Layer caching (GHA cache)                                        │║
-║  └────────────────────────────┬────────────────────────────────────────┘║
+║  ┌─────────────────────────────────────────────────────────────────────┐ ║
+║  │              STAGE 5: CONTAINER BUILD                               │ ║
+║  │  ───────────────────────────────────────────────────────────────────│ ║
+║  │  • Multi-stage Docker build                                         │ ║
+║  │  • Container startup test                                           │ ║
+║  │  • Health endpoint verification                                     │ ║
+║  │  • Layer caching (GHA cache)                                        │ ║
+║  └────────────────────────────┬────────────────────────────────────────┘ ║
 ║                               ▼                                          ║
-║  ┌─────────────────────────────────────────────────────────────────────┐║
-║  │              STAGE 6: CONTAINER SCAN                                 │║
-║  │  ───────────────────────────────────────────────────────────────────│║
-║  │  • Trivy vulnerability scanner                                      │║
-║  │  • SARIF report → GitHub Security                                   │║
-║  │  • CRITICAL/HIGH severity check                                     │║
-║  └────────────────────────────┬────────────────────────────────────────┘║
+║  ┌─────────────────────────────────────────────────────────────────────┐ ║
+║  │              STAGE 6: CONTAINER SCAN                                │ ║
+║  │  ───────────────────────────────────────────────────────────────────│ ║
+║  │  • Trivy vulnerability scanner                                      │ ║
+║  │  • SARIF report → GitHub Security                                   │ ║
+║  │  • CRITICAL/HIGH severity check                                     │ ║
+║  └────────────────────────────┬────────────────────────────────────────┘ ║
 ║                               ▼                                          ║
-║  ┌─────────────────────────────────────────────────────────────────────┐║
-║  │              STAGE 7: PUBLISH                                        │║
-║  │  ───────────────────────────────────────────────────────────────────│║
-║  │  • Push to DockerHub                                                │║
-║  │  • Tags: commit SHA + latest                                        │║
-║  └─────────────────────────────────────────────────────────────────────┘║
+║  ┌─────────────────────────────────────────────────────────────────────┐ ║
+║  │              STAGE 7: PUBLISH                                       │ ║
+║  │  ───────────────────────────────────────────────────────────────────│ ║
+║  │  • Push to DockerHub                                                │ ║
+║  │  • Tags: commit SHA + latest                                        │ ║
+║  └─────────────────────────────────────────────────────────────────────┘ ║
 ║                                                                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
                                  │
                                  │ on success
                                  ▼
 ╔══════════════════════════════════════════════════════════════════════════╗
-║                        CD PIPELINE (cd.yml)                               ║
-║                        Triggered on: CI success                           ║
+║                        CD PIPELINE (cd.yml)                              ║
+║                        Triggered on: CI success                          ║
 ╠══════════════════════════════════════════════════════════════════════════╣
 ║                                                                          ║
-║  ┌─────────────────────────────────────────────────────────────────────┐║
-║  │              STAGE 1: DEPLOY                                         │║
-║  │  ───────────────────────────────────────────────────────────────────│║
-║  │  • SSH to EC2 instance                                              │║
-║  │  • Check/Start Minikube                                             │║
-║  │  • kubectl rollout restart                                          │║
-║  │  • Wait for rollout completion                                      │║
-║  └────────────────────────────┬────────────────────────────────────────┘║
+║  ┌─────────────────────────────────────────────────────────────────────┐ ║
+║  │              STAGE 1: DEPLOY                                        │ ║
+║  │  ───────────────────────────────────────────────────────────────────│ ║
+║  │  • SSH to EC2 instance                                              │ ║
+║  │  • Check/Start Minikube                                             │ ║
+║  │  • kubectl rollout restart                                          │ ║
+║  │  • Wait for rollout completion                                      │ ║
+║  └────────────────────────────┬────────────────────────────────────────┘ ║
 ║                               ▼                                          ║
-║  ┌─────────────────────────────────────────────────────────────────────┐║
-║  │              STAGE 2: VERIFY                                         │║
-║  │  ───────────────────────────────────────────────────────────────────│║
-║  │  • Wait for pods to stabilize                                       │║
-║  │  • Health check: curl /api/health                                   │║
-║  └────────────────────────────┬────────────────────────────────────────┘║
+║  ┌─────────────────────────────────────────────────────────────────────┐ ║
+║  │              STAGE 2: VERIFY                                        │ ║
+║  │  ───────────────────────────────────────────────────────────────────│ ║
+║  │  • Wait for pods to stabilize                                       │ ║
+║  │  • Health check: curl /api/health                                   │ ║
+║  └────────────────────────────┬────────────────────────────────────────┘ ║
 ║                               ▼                                          ║
-║  ┌─────────────────────────────────────────────────────────────────────┐║
-║  │              STAGE 3: DAST SCAN                                      │║
-║  │  ───────────────────────────────────────────────────────────────────│║
-║  │  • Security headers analysis                                        │║
-║  │  • API response validation                                          │║
-║  │  • Error handling verification                                      │║
-║  │  • Information disclosure check                                     │║
-║  │  • Rate limiting verification                                       │║
-║  └────────────────────────────┬────────────────────────────────────────┘║
+║  ┌─────────────────────────────────────────────────────────────────────┐ ║
+║  │              STAGE 3: DAST SCAN                                     │ ║
+║  │  ───────────────────────────────────────────────────────────────────│ ║
+║  │  • Security headers analysis                                        │ ║
+║  │  • API response validation                                          │ ║
+║  │  • Error handling verification                                      │ ║
+║  │  • Information disclosure check                                     │ ║
+║  │  • Rate limiting verification                                       │ ║
+║  └────────────────────────────┬────────────────────────────────────────┘ ║
 ║                               ▼                                          ║
-║  ┌─────────────────────────────────────────────────────────────────────┐║
-║  │              STAGE 4: ROLLBACK (Conditional)                         │║
-║  │  ───────────────────────────────────────────────────────────────────│║
-║  │  • Triggered on: deploy OR verify failure                           │║
-║  │  • kubectl rollout undo                                             │║
-║  │  • Restore previous working version                                 │║
-║  └─────────────────────────────────────────────────────────────────────┘║
+║  ┌─────────────────────────────────────────────────────────────────────┐ ║
+║  │              STAGE 4: ROLLBACK (Conditional)                        │ ║
+║  │  ───────────────────────────────────────────────────────────────────│ ║
+║  │  • Triggered on: deploy OR verify failure                           │ ║
+║  │  • kubectl rollout undo                                             │ ║
+║  │  • Restore previous working version                                 │ ║
+║  └─────────────────────────────────────────────────────────────────────┘ ║
 ║                                                                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
                                  │
                                  ▼
 ╔══════════════════════════════════════════════════════════════════════════╗
-║                    KUBERNETES (Minikube on AWS EC2)                       ║
+║                    KUBERNETES (Minikube on AWS EC2)                      ║
 ╠══════════════════════════════════════════════════════════════════════════╣
 ║                                                                          ║
 ║  Namespace: spendwise                                                    ║
 ║                                                                          ║
-║  ┌─────────────────────────────────────────────────────────────────────┐║
-║  │  Deployment (2 replicas, RollingUpdate)                             │║
-║  │  ┌─────────────────┐  ┌─────────────────┐                          │║
-║  │  │  Pod 1          │  │  Pod 2          │                          │║
-║  │  │  spendwise-     │  │  spendwise-     │                          │║
-║  │  │  server:latest  │  │  server:latest  │                          │║
-║  │  │  CPU: 100m-500m │  │  CPU: 100m-500m │                          │║
-║  │  │  RAM: 128-512Mi │  │  RAM: 128-512Mi │                          │║
-║  │  └─────────────────┘  └─────────────────┘                          │║
-║  └────────────────────────────┬────────────────────────────────────────┘║
+║  ┌─────────────────────────────────────────────────────────────────────┐ ║
+║  │  Deployment (2 replicas, RollingUpdate)                             │ ║
+║  │  ┌─────────────────┐  ┌─────────────────┐                           │ ║
+║  │  │  Pod 1          │  │  Pod 2          │                           │ ║
+║  │  │  spendwise-     │  │  spendwise-     │                           │ ║
+║  │  │  server:latest  │  │  server:latest  │                           │ ║
+║  │  │  CPU: 100m-500m │  │  CPU: 100m-500m │                           │ ║
+║  │  │  RAM: 128-512Mi │  │  RAM: 128-512Mi │                           │ ║
+║  │  └─────────────────┘  └─────────────────┘                           │ ║
+║  └────────────────────────────┬────────────────────────────────────────┘ ║
 ║                               │                                          ║
-║  ┌────────────────────────────┴────────────────────────────────────────┐║
-║  │  Service (LoadBalancer/NodePort)                                    │║
-║  │  Port: 3000 → Container: 3000                                       │║
-║  └─────────────────────────────────────────────────────────────────────┘║
+║  ┌────────────────────────────┴────────────────────────────────────────┐ ║
+║  │  Service (LoadBalancer/NodePort)                                    │ ║
+║  │  Port: 3000 → Container: 3000                                       │ ║
+║  └─────────────────────────────────────────────────────────────────────┘ ║
 ║                                                                          ║
 ╚══════════════════════════════════════════════════════════════════════════╝
                                  │
@@ -676,37 +676,37 @@ rollback:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
-│                        SECURITY LAYERS                                    │
+│                        SECURITY LAYERS                                   │
 ├──────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
 │  CI PHASE (Shift-Left)                                                   │
-│  ┌─────────────────────────────────────────────────────────────────────┐│
-│  │ SAST    │ SCA       │ Container Scan                                ││
-│  │ CodeQL  │ npm audit │ Trivy                                         ││
-│  │ ↓       │ ↓         │ ↓                                             ││
-│  │ Code    │ Dependency│ OS/Library                                    ││
-│  │ Vulns   │ CVEs      │ CVEs                                          ││
-│  └─────────────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────────────┐ │
+│  │ SAST    │ SCA       │ Container Scan                                │ │
+│  │ CodeQL  │ npm audit │ Trivy                                         │ │
+│  │ ↓       │ ↓         │ ↓                                             │ │
+│  │ Code    │ Dependency│ OS/Library                                    │ │
+│  │ Vulns   │ CVEs      │ CVEs                                          │ │
+│  └─────────────────────────────────────────────────────────────────────┘ │
 │                                                                          │
 │  CD PHASE (Runtime)                                                      │
-│  ┌─────────────────────────────────────────────────────────────────────┐│
-│  │ DAST                                                                ││
-│  │ Security Headers │ Error Handling │ Info Disclosure │ Rate Limits  ││
-│  └─────────────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────────────┐ │
+│  │ DAST                                                                │ │
+│  │ Security Headers │ Error Handling │ Info Disclosure │ Rate Limits   │ │
+│  └─────────────────────────────────────────────────────────────────────┘ │
 │                                                                          │
 │  APPLICATION LAYER                                                       │
-│  ┌─────────────────────────────────────────────────────────────────────┐│
-│  │ Rate Limiting   │ JWT Auth    │ Input Validation │ Helmet Headers  ││
-│  │ 100 req/15min   │ bcrypt hash │ Sanitization     │ XSS, CSRF       ││
-│  └─────────────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────────────┐ │
+│  │ Rate Limiting   │ JWT Auth    │ Input Validation │ Helmet Headers   │ │
+│  │ 100 req/15min   │ bcrypt hash │ Sanitization     │ XSS, CSRF        │ │
+│  └─────────────────────────────────────────────────────────────────────┘ │
 │                                                                          │
 │  CONTAINER LAYER                                                         │
-│  ┌─────────────────────────────────────────────────────────────────────┐│
-│  │ Non-root user (UID 1001)                                            ││
-│  │ Read-only root filesystem (where possible)                          ││
-│  │ Dropped ALL capabilities                                            ││
-│  │ Resource limits (CPU/Memory)                                        ││
-│  └─────────────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────────────┐ │
+│  │ Non-root user (UID 1001)                                            │ │
+│  │ Read-only root filesystem (where possible)                          │ │
+│  │ Dropped ALL capabilities                                            │ │
+│  │ Resource limits (CPU/Memory)                                        │ │
+│  └─────────────────────────────────────────────────────────────────────┘ │
 │                                                                          │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
@@ -781,8 +781,8 @@ CMD ["node", "index.js"]
 | DOCKERHUB_TOKEN | GitHub Secrets | `${{ secrets.DOCKERHUB_TOKEN }}` |
 | EC2_SSH_KEY | GitHub Secrets | `${{ secrets.EC2_SSH_KEY }}` |
 | EC2_HOST | GitHub Secrets | `${{ secrets.EC2_HOST }}` |
-| MONGODB_URI | Terraform vars → K8s Secret | `kubectl create secret` |
-| JWT_SECRET | Terraform vars → K8s Secret | `kubectl create secret` |
+| MONGODB_URI | GitHub Secrets | `${{ secrets.MONGODB_URI }}` |
+| JWT_SECRET | GitHub Secrets | `${{ secrets.JWT_SECRET }}` |
 
 **Terraform Variables** (not committed):
 ```hcl
@@ -1061,7 +1061,7 @@ This project demonstrates a **production-grade CI/CD pipeline** for the Spendwis
 
 4. **Pipeline Design Matters**: Thoughtful stage ordering (fail fast, parallelize independent jobs) significantly reduces feedback time
 
-5. **Container Security Is Multi-faceted**: It's not just about code—base images, user permissions, and capabilities all matter
+5. **Container Security Is Multi-faceted**: It's not just about codebase images, user permissions, and capabilities all matter
 
 ### Pipeline Philosophy
 
