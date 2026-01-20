@@ -88,7 +88,7 @@ jobs:
             echo ""
             echo "=== Kubernetes Pod Status ==="
             kubectl get pods -n spendwise -o wide
-            POD_STATUS=$(kubectl get pods -n spendwise -l app=spendwise-server -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "Unknown")
+            POD_STATUS=$(kubectl get pods -n spendwise -l app=spendwise -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "Unknown")
             echo "Pod Status: ${POD_STATUS}"
             
             if [ "$POD_STATUS" != "Running" ]; then
