@@ -58,7 +58,7 @@ router.post('/', async (req, res) => {
 
         // Calculate initial next due date
         const start = startDate ? new Date(startDate) : new Date();
-        let nextDueDate = new Date(start);
+        const nextDueDate = new Date(start);
 
         // Adjust for day of month if monthly
         if (frequency === 'monthly' && dayOfMonth) {

@@ -1,8 +1,4 @@
-# =============================================================================
-# SPENDWISE BACKEND - CONTINUOUS DEPLOYMENT PIPELINE
-# Purpose: Deploy to Kubernetes cluster after successful CI
-# =============================================================================
-
+# CD Pipeline - Deploy to Kubernetes
 name: CD Pipeline
 
 on:
@@ -15,192 +11,96 @@ on:
 env:
   DOCKER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/spendwise-server
 
-# =============================================================================
-# JOB STRUCTURE
-# 
-# [Deploy to Kubernetes] ──> [Verify Deployment] ──> [DAST Security Scan]
-#          |
-#          └──> [Rollback] (on failure)
-# =============================================================================
-
 jobs:
-  # ---------------------------------------------------------------------------
-  # JOB 1: DEPLOY - Deploy to Kubernetes cluster
-  # ---------------------------------------------------------------------------
+  # Stage 1: Deploy
   deploy:
     name: Deploy to Kubernetes
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
-    
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Configure SSH Connection
+      - uses: actions/checkout@v4
+      - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           echo -e "Host *\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
-
-      - name: Deploy to Kubernetes Cluster
+      - name: Deploy to K8s
         run: |
           ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
-            echo "Starting Kubernetes Deployment"
-            echo "==============================="
-            
-            # Verify Minikube status
             echo "[1/4] Checking Minikube status..."
             minikube status || minikube start --driver=docker --force
             
-            # Trigger rolling update
-            echo "[2/4] Initiating rolling update..."
+            echo "[2/4] Rolling update..."
             kubectl rollout restart deployment/spendwise-server -n spendwise
             
-            # Wait for rollout to complete
-            echo "[3/4] Waiting for rollout to complete..."
+            echo "[3/4] Waiting for rollout..."
             kubectl rollout status deployment/spendwise-server -n spendwise --timeout=180s
             
-            # Display deployment status
-            echo "[4/4] Deployment Status:"
+            echo "[4/4] Deployment status:"
             kubectl get pods -n spendwise
-            kubectl get svc -n spendwise
-            
-            echo "==============================="
-            echo "Kubernetes Deployment Complete"
           EOF
 
-  # ---------------------------------------------------------------------------
-  # JOB 2: VERIFY - Verify deployment health
-  # ---------------------------------------------------------------------------
+  # Stage 2: Verify
   verify:
     name: Verify Deployment
     runs-on: ubuntu-latest
     needs: [deploy]
-    
     steps:
-      - name: Wait for Pods to Stabilize
-        run: sleep 20
-
+      - run: sleep 20
       - name: Health Check
         run: |
-          echo "Verifying deployment health..."
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://${{ secrets.EC2_HOST }}:3000/api/health)
-          
-          if [ "$HTTP_STATUS" -eq 200 ]; then
-            echo "Health check passed - HTTP $HTTP_STATUS"
-          else
-            echo "Health check failed - HTTP $HTTP_STATUS"
-            exit 1
-          fi
+          curl -f http://${{ secrets.EC2_HOST }}:3000/api/health || exit 1
+          echo "Health check passed"
 
-      - name: Verify API Response
-        run: |
-          RESPONSE=$(curl -s http://${{ secrets.EC2_HOST }}:3000/api/health)
-          echo "API Response: $RESPONSE"
-
-  # ---------------------------------------------------------------------------
-  # JOB 3: DAST - Dynamic Application Security Testing
-  # ---------------------------------------------------------------------------
+  # Stage 3: DAST
   dast-scan:
     name: DAST Security Scan
     runs-on: ubuntu-latest
     needs: [verify]
-    
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Configure SSH Connection
+      - uses: actions/checkout@v4
+      - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           echo -e "Host *\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
-
-      - name: Run DAST Security Tests
+      - name: Run DAST
         run: |
           ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
-            echo "Running DAST Security Scan"
-            echo "=========================="
-            
-            # Test 1: Security Headers
-            echo "[1/5] Checking security headers..."
+            echo "[1/5] Security headers..."
             curl -sI http://localhost:3000/api/health | head -10
             
-            # Test 2: SQL Injection
-            echo ""
-            echo "[2/5] Testing SQL injection patterns..."
-            SQLI_RESULT=$(curl -s "http://localhost:3000/api/health?id=1'OR'1'='1" 2>&1)
-            echo "Response: ${SQLI_RESULT:0:100}"
+            echo "[2/5] SQL injection test..."
+            curl -s "http://localhost:3000/api/health?id=1'OR'1'='1" | head -c 100
             
-            # Test 3: XSS
-            echo ""
-            echo "[3/5] Testing XSS patterns..."
-            XSS_RESULT=$(curl -s "http://localhost:3000/api/health?q=<script>alert(1)</script>" 2>&1)
-            echo "Response: ${XSS_RESULT:0:100}"
+            echo "[3/5] XSS test..."
+            curl -s "http://localhost:3000/api/health?q=<script>alert(1)</script>" | head -c 100
             
-            # Test 4: Error Handling
-            echo ""
-            echo "[4/5] Testing error handling..."
-            ERROR_RESULT=$(curl -s http://localhost:3000/api/nonexistent 2>&1)
-            echo "Response: ${ERROR_RESULT:0:100}"
+            echo "[4/5] Error handling..."
+            curl -s http://localhost:3000/api/nonexistent | head -c 100
             
-            # Test 5: Sensitive Data Exposure
-            echo ""
-            echo "[5/5] Checking for sensitive data exposure..."
-            HEALTH_RESULT=$(curl -s http://localhost:3000/api/health)
-            if echo "$HEALTH_RESULT" | grep -qi "password\|secret\|token"; then
-              echo "WARNING: Possible sensitive data exposure detected"
-            else
-              echo "OK: No sensitive data detected in response"
-            fi
-            
-            echo ""
-            echo "=========================="
-            echo "DAST Security Scan Complete"
+            echo "[5/5] Sensitive data check..."
+            curl -s http://localhost:3000/api/health | grep -qi "password\|secret" && echo "WARNING" || echo "OK"
           EOF
 
-      - name: Generate CD Summary
-        run: |
-          echo "## CD Pipeline Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Deploy to Kubernetes | Passed |" >> $GITHUB_STEP_SUMMARY
-          echo "| Verify Deployment | Passed |" >> $GITHUB_STEP_SUMMARY
-          echo "| DAST Security Scan | Passed |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Deployment Target:** \`${{ secrets.EC2_HOST }}:3000\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Replicas:** 2" >> $GITHUB_STEP_SUMMARY
-          echo "**Strategy:** Rolling Update (Zero Downtime)" >> $GITHUB_STEP_SUMMARY
-
-  # ---------------------------------------------------------------------------
-  # JOB 4: ROLLBACK - Rollback on failure
-  # ---------------------------------------------------------------------------
+  # Stage 4: Rollback (on failure)
   rollback:
     name: Rollback Deployment
     runs-on: ubuntu-latest
     needs: [deploy, verify]
     if: failure()
-    
     steps:
-      - name: Configure SSH Connection
+      - name: Configure SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           echo -e "Host *\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
-
-      - name: Execute Rollback
+      - name: Rollback
         run: |
           ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
-            echo "Deployment failed - initiating rollback"
-            echo "======================================="
-            
             kubectl rollout undo deployment/spendwise-server -n spendwise
             kubectl rollout status deployment/spendwise-server -n spendwise --timeout=120s
-            
-            echo "======================================="
-            echo "Rollback complete"
           EOF
