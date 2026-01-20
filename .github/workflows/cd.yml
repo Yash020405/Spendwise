@@ -47,11 +47,25 @@ jobs:
     runs-on: ubuntu-latest
     needs: [deploy]
     steps:
-      - run: sleep 20
-      - name: Health Check
+      - name: Health Check with Retry
         run: |
-          curl -f http://${{ secrets.EC2_HOST }}:3000/api/health || exit 1
-          echo "Health check passed"
+          echo "Waiting for deployment to stabilize..."
+          MAX_RETRIES=6
+          RETRY_INTERVAL=15
+          
+          for i in $(seq 1 $MAX_RETRIES); do
+            echo "Attempt $i of $MAX_RETRIES..."
+            if curl -sf --max-time 10 http://${{ secrets.EC2_HOST }}:3000/api/health; then
+              echo ""
+              echo "Health check passed on attempt $i"
+              exit 0
+            fi
+            echo "Attempt $i failed, waiting ${RETRY_INTERVAL}s..."
+            sleep $RETRY_INTERVAL
+          done
+          
+          echo "Health check failed after $MAX_RETRIES attempts"
+          exit 1
 
   # Stage 3: DAST - Security Testing via SSH
   dast-scan:
