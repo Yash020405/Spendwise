@@ -94,7 +94,7 @@ jobs:
           target: 'http://${{ secrets.EC2_HOST }}:3000/'
           rules_file_name: '.zap/rules.tsv'
           cmd_options: '-j -a'
-          fail_action: warn
+          fail_action: false
           allow_issue_writing: false
         continue-on-error: true
 

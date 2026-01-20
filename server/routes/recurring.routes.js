@@ -100,9 +100,37 @@ router.post('/', async (req, res) => {
 // @access  Private
 router.put('/:id', async (req, res) => {
     try {
+        // Sanitize and validate each field explicitly
+        const allowedFields = {};
+
+        if (req.body.amount !== undefined && typeof req.body.amount === 'number') {
+            allowedFields.amount = Number(req.body.amount);
+        }
+        if (req.body.description && typeof req.body.description === 'string') {
+            allowedFields.description = String(req.body.description).trim().slice(0, 500);
+        }
+        if (req.body.category && typeof req.body.category === 'string') {
+            allowedFields.category = String(req.body.category).trim();
+        }
+        if (req.body.source && typeof req.body.source === 'string') {
+            allowedFields.source = String(req.body.source).trim();
+        }
+        if (req.body.paymentMethod && typeof req.body.paymentMethod === 'string') {
+            allowedFields.paymentMethod = String(req.body.paymentMethod).trim();
+        }
+        if (req.body.frequency && typeof req.body.frequency === 'string') {
+            allowedFields.frequency = String(req.body.frequency).trim();
+        }
+        if (req.body.dayOfMonth !== undefined && typeof req.body.dayOfMonth === 'number') {
+            allowedFields.dayOfMonth = Number(req.body.dayOfMonth);
+        }
+        if (req.body.isActive !== undefined && typeof req.body.isActive === 'boolean') {
+            allowedFields.isActive = Boolean(req.body.isActive);
+        }
+
         const recurring = await RecurringTransaction.findOneAndUpdate(
             { _id: req.params.id, userId: req.user._id },
-            req.body,
+            { $set: allowedFields },
             { new: true, runValidators: true }
         );
 

@@ -143,9 +143,18 @@ router.put('/:id', async (req, res) => {
     try {
         const { amount, category, categoryIcon, paymentMethod, description, date } = req.body;
 
+        // Sanitize update fields
+        const updateFields = {};
+        if (amount !== undefined && typeof amount === 'number') updateFields.amount = Number(amount);
+        if (category && typeof category === 'string') updateFields.category = String(category).trim();
+        if (categoryIcon && typeof categoryIcon === 'string') updateFields.categoryIcon = String(categoryIcon).trim();
+        if (paymentMethod && typeof paymentMethod === 'string') updateFields.paymentMethod = String(paymentMethod).trim();
+        if (description && typeof description === 'string') updateFields.description = String(description).trim().slice(0, 500);
+        if (date) updateFields.date = new Date(date);
+
         const expense = await Expense.findOneAndUpdate(
             { _id: req.params.id, userId: req.user._id },
-            { amount, category, categoryIcon, paymentMethod, description, date },
+            { $set: updateFields },
             { new: true, runValidators: true }
         );
 

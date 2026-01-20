@@ -70,9 +70,15 @@ router.put('/:id', async (req, res) => {
     try {
         const { amount } = req.body;
 
+        // Sanitize update fields
+        const updateFields = {};
+        if (amount !== undefined && typeof amount === 'number') {
+            updateFields.amount = Number(amount);
+        }
+
         const budget = await Budget.findOneAndUpdate(
             { _id: req.params.id, userId: req.user._id },
-            { amount },
+            { $set: updateFields },
             { new: true, runValidators: true }
         );
 

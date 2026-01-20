@@ -81,9 +81,15 @@ router.put('/:id', async (req, res) => {
     try {
         const { name, icon, color } = req.body;
 
+        // Sanitize update fields
+        const updateFields = {};
+        if (name && typeof name === 'string') updateFields.name = String(name).trim().slice(0, 50);
+        if (icon && typeof icon === 'string') updateFields.icon = String(icon).trim();
+        if (color && typeof color === 'string') updateFields.color = String(color).trim();
+
         const category = await Category.findOneAndUpdate(
             { _id: req.params.id, userId: req.user._id },
-            { name, icon, color },
+            { $set: updateFields },
             { new: true, runValidators: true }
         );
 

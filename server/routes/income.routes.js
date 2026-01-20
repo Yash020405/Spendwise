@@ -94,9 +94,16 @@ router.put('/:id', async (req, res) => {
     try {
         const { amount, source, description, date } = req.body;
 
+        // Sanitize update fields
+        const updateFields = {};
+        if (amount !== undefined && typeof amount === 'number') updateFields.amount = Number(amount);
+        if (source && typeof source === 'string') updateFields.source = String(source).trim();
+        if (description && typeof description === 'string') updateFields.description = String(description).trim().slice(0, 500);
+        if (date) updateFields.date = new Date(date);
+
         const income = await Income.findOneAndUpdate(
             { _id: req.params.id, userId: req.user._id },
-            { amount, source, description, date },
+            { $set: updateFields },
             { new: true, runValidators: true }
         );
 

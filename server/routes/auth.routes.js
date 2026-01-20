@@ -168,15 +168,25 @@ router.put("/me", protect, async (req, res) => {
   try {
     const { name, currency, monthlyBudget } = req.body;
 
+    // Build update object with explicit sanitization
     const updateFields = {};
-    if (name) updateFields.name = name;
-    if (currency && CURRENCIES[currency]) updateFields.currency = currency;
-    if (monthlyBudget !== undefined) updateFields.monthlyBudget = monthlyBudget;
 
+    // Sanitize and validate each field explicitly
+    if (name && typeof name === 'string') {
+      updateFields.name = String(name).trim().slice(0, 100);
+    }
+    if (currency && typeof currency === 'string' && CURRENCIES[currency]) {
+      updateFields.currency = String(currency);
+    }
+    if (monthlyBudget !== undefined && typeof monthlyBudget === 'number') {
+      updateFields.monthlyBudget = Number(monthlyBudget);
+    }
+
+    // Use $set operator explicitly to prevent injection
     const user = await User.findByIdAndUpdate(
       req.user._id,
-      updateFields,
-      { new: true }
+      { $set: updateFields },
+      { new: true, runValidators: true }
     );
 
     res.status(200).json({
