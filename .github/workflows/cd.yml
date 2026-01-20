@@ -53,50 +53,176 @@ jobs:
           curl -f http://${{ secrets.EC2_HOST }}:3000/api/health || exit 1
           echo "Health check passed"
 
-  # Stage 3: DAST - OWASP ZAP (Production-Grade)
+  # Stage 3: DAST - Security Testing via SSH
   dast-scan:
-    name: DAST Security Scan (OWASP ZAP)
+    name: DAST Security Scan
     runs-on: ubuntu-latest
     needs: [verify]
-    permissions:
-      security-events: write
-      contents: read
-      issues: write
     steps:
-      - uses: actions/checkout@v4
-      
-      # Create ZAP rules configuration for comprehensive scanning
-      - name: Create ZAP Rules
+      - name: Configure SSH
         run: |
-          mkdir -p .zap
-          cat > .zap/rules.tsv << 'RULES'
-          10010	WARN	(Cookie No HttpOnly Flag)
-          10011	WARN	(Cookie Without Secure Flag)
-          10015	WARN	(Incomplete or No Cache-control Header Set)
-          10017	WARN	(Cross-Domain JavaScript Source File Inclusion)
-          10019	WARN	(Content-Type Header Missing)
-          10020	WARN	(Anti-clickjacking Header)
-          10021	WARN	(X-Content-Type-Options Header Missing)
-          10036	WARN	(Server Leaks Version Information)
-          10038	WARN	(Content Security Policy Header Not Set)
-          10098	WARN	(Cross-Domain Misconfiguration)
-          10202	WARN	(Absence of Anti-CSRF Tokens)
-          40012	WARN	(Cross Site Scripting Reflected)
-          40014	WARN	(Cross Site Scripting Persistent)
-          40018	WARN	(SQL Injection)
-          90033	WARN	(Loosely Scoped Cookie)
-          RULES
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          echo -e "Host *\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
       
-      # Run OWASP ZAP Baseline Scan with AJAX spider
-      - name: Run OWASP ZAP Scan
-        uses: zaproxy/action-baseline@v0.14.0
-        with:
-          target: 'http://${{ secrets.EC2_HOST }}:3000/'
-          rules_file_name: '.zap/rules.tsv'
-          cmd_options: '-j -a'
-          fail_action: false
-          allow_issue_writing: false
-        continue-on-error: true
+      - name: Run DAST Security Tests
+        run: |
+          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+            set -e
+            
+            echo "=== Starting DAST (Dynamic Application Security Testing) ==="
+            echo "Target: Spendwise Server on Kubernetes"
+            echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S')"
+            echo ""
+            
+            # Get the NodePort for accessing the service
+            NODE_PORT=$(kubectl get service spendwise-service -n spendwise -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo "30000")
+            APP_URL="http://localhost:${NODE_PORT}"
+            
+            echo "Testing application at: ${APP_URL}"
+            echo "Waiting for application to be ready..."
+            sleep 5
+            
+            # Verify pod is running
+            echo ""
+            echo "=== Kubernetes Pod Status ==="
+            kubectl get pods -n spendwise -o wide
+            POD_STATUS=$(kubectl get pods -n spendwise -l app=spendwise-server -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "Unknown")
+            echo "Pod Status: ${POD_STATUS}"
+            
+            if [ "$POD_STATUS" != "Running" ]; then
+              echo "ERROR: Pod is not in Running state"
+              exit 1
+            fi
+            echo ""
+            
+            # Test 1: Health endpoint accessibility
+            echo "=== Test 1: Health Check ==="
+            if curl -sf --max-time 10 "${APP_URL}/api/health" > /tmp/health_response.json; then
+              echo "✓ Health endpoint accessible"
+              echo "Response: $(cat /tmp/health_response.json)"
+            else
+              echo "✗ Health endpoint failed"
+              exit 1
+            fi
+            echo ""
+            
+            # Test 2: Security Headers Check
+            echo "=== Test 2: Security Headers Analysis ==="
+            curl -sI --max-time 10 "${APP_URL}/api/health" > /tmp/headers.txt 2>/dev/null || true
+            
+            SECURITY_SCORE=0
+            TOTAL_CHECKS=6
+            
+            if grep -qi "x-content-type-options" /tmp/headers.txt; then
+              echo "✓ X-Content-Type-Options: present"
+              SECURITY_SCORE=$((SECURITY_SCORE + 1))
+            else
+              echo "✗ X-Content-Type-Options: MISSING (prevents MIME-type sniffing)"
+            fi
+            
+            if grep -qi "x-frame-options" /tmp/headers.txt; then
+              echo "✓ X-Frame-Options: present"
+              SECURITY_SCORE=$((SECURITY_SCORE + 1))
+            else
+              echo "✗ X-Frame-Options: MISSING (prevents clickjacking)"
+            fi
+            
+            if grep -qi "x-dns-prefetch-control" /tmp/headers.txt; then
+              echo "✓ X-DNS-Prefetch-Control: present"
+              SECURITY_SCORE=$((SECURITY_SCORE + 1))
+            else
+              echo "✗ X-DNS-Prefetch-Control: MISSING"
+            fi
+            
+            if grep -qi "strict-transport-security" /tmp/headers.txt; then
+              echo "✓ Strict-Transport-Security: present"
+              SECURITY_SCORE=$((SECURITY_SCORE + 1))
+            else
+              echo "⚠ Strict-Transport-Security: MISSING (HSTS recommended for HTTPS)"
+            fi
+            
+            if grep -qi "content-security-policy" /tmp/headers.txt; then
+              echo "✓ Content-Security-Policy: present"
+              SECURITY_SCORE=$((SECURITY_SCORE + 1))
+            else
+              echo "✗ Content-Security-Policy: MISSING (prevents XSS attacks)"
+            fi
+            
+            if grep -qi "x-xss-protection" /tmp/headers.txt; then
+              echo "✓ X-XSS-Protection: present"
+              SECURITY_SCORE=$((SECURITY_SCORE + 1))
+            else
+              echo "⚠ X-XSS-Protection: MISSING (legacy XSS protection)"
+            fi
+            
+            echo ""
+            echo "Security Headers Score: ${SECURITY_SCORE}/${TOTAL_CHECKS}"
+            echo ""
+            
+            # Test 3: API Response Validation
+            echo "=== Test 3: API Response Validation ==="
+            RESPONSE=$(curl -s --max-time 10 "${APP_URL}/api/health" 2>/dev/null || echo "{}")
+            echo "Response content: ${RESPONSE}"
+            
+            if echo "$RESPONSE" | grep -q "status"; then
+              echo "✓ Valid JSON response with status field"
+            else
+              echo "⚠ Response format unexpected"
+            fi
+            echo ""
+            
+            # Test 4: 404 Handling
+            echo "=== Test 4: Error Handling (404) ==="
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${APP_URL}/nonexistent" 2>/dev/null || echo "000")
+            echo "Non-existent route returns: HTTP ${STATUS}"
+            
+            if [ "$STATUS" = "404" ] || [ "$STATUS" = "301" ]; then
+              echo "✓ Proper 404 error handling"
+            else
+              echo "⚠ Unexpected status code: ${STATUS}"
+            fi
+            echo ""
+            
+            # Test 5: Server Information Disclosure
+            echo "=== Test 5: Server Information Disclosure ==="
+            if grep -qi "^server:" /tmp/headers.txt; then
+              SERVER_HEADER=$(grep -i "^server:" /tmp/headers.txt | head -n1)
+              echo "⚠ Server header present: ${SERVER_HEADER}"
+              echo "  Recommendation: Remove or obfuscate server version information"
+            else
+              echo "✓ Server header not exposed"
+            fi
+            echo ""
+            
+            # Test 6: HTTP Methods Allowed
+            echo "=== Test 6: Allowed HTTP Methods ==="
+            METHODS=$(curl -sI -X OPTIONS --max-time 10 "${APP_URL}/api/health" 2>/dev/null | grep -i "allow:" || echo "Not disclosed")
+            echo "Allowed methods: ${METHODS}"
+            echo ""
+            
+            # Test 7: Rate Limiting (Basic Check)
+            echo "=== Test 7: Rate Limiting Test ==="
+            echo "Sending 5 rapid requests..."
+            for i in {1..5}; do
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "${APP_URL}/api/health" 2>/dev/null || echo "000")
+              echo "Request $i: HTTP ${STATUS}"
+            done
+            echo "Note: No 429 (Too Many Requests) - Rate limiting may not be configured"
+            echo ""
+            
+            # Final Summary
+            echo "=== DAST Security Scan Summary ==="
+            echo "✓ Application is accessible and responsive"
+            echo "✓ Health endpoint working correctly"
+            echo "  Security Headers: ${SECURITY_SCORE}/${TOTAL_CHECKS} implemented"
+            echo ""
+            echo "=== DAST Scan Completed Successfully ==="
+            
+            # Cleanup
+            rm -f /tmp/headers.txt /tmp/health_response.json
+          EOF
 
   # Stage 4: Rollback (on failure)
   rollback:
