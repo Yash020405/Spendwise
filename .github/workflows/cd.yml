@@ -90,24 +90,17 @@ jobs:
             echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S')"
             echo ""
             
-            # Wait for any terminating pods to complete
+            # Wait for rollout to complete
             echo "Waiting for rollout to stabilize..."
             kubectl rollout status deployment/spendwise-server -n spendwise --timeout=120s || true
+            sleep 5
+            
+            # Ensure port-forward is running (restart if needed)
+            echo "Checking port-forward service..."
+            sudo systemctl restart k8s-port-forward || true
             sleep 10
             
-            # Use port-forward service (running on port 3000) or minikube IP for NodePort
-            MINIKUBE_IP=$(minikube ip 2>/dev/null || echo "localhost")
-            NODE_PORT=$(kubectl get service spendwise-server -n spendwise -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo "30000")
-            
-            # Try port-forward first (localhost:3000), fallback to minikube NodePort
-            if curl -sf --max-time 5 "http://localhost:3000/api/health" >/dev/null 2>&1; then
-              APP_URL="http://localhost:3000"
-              echo "Using port-forward: ${APP_URL}"
-            else
-              APP_URL="http://${MINIKUBE_IP}:${NODE_PORT}"
-              echo "Using NodePort: ${APP_URL}"
-            fi
-            
+            APP_URL="http://localhost:3000"
             echo "Testing application at: ${APP_URL}"
             
             # Verify pod is running
@@ -134,8 +127,8 @@ jobs:
                 HEALTH_OK=true
                 break
               fi
-              echo "Attempt $attempt failed, waiting 10s..."
-              sleep 10
+              echo "Attempt $attempt failed, waiting 5s..."
+              sleep 5
             done
             
             if [ "$HEALTH_OK" != "true" ]; then
