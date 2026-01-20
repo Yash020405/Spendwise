@@ -797,9 +797,13 @@ jwt_secret         = "my-jwt-secret"       # SENSITIVE
 
 ## 6. Results & Observations
 
-> **[Screenshot Placeholder: CI Pipeline - All 7 Jobs Passed]**
-> 
-> **[Screenshot Placeholder: CD Pipeline - Deploy, Verify, DAST Passed]**
+### CI Pipeline Execution
+
+![CI Pipeline - All 7 Jobs Passed](screenshots/CI.png)
+
+### CD Pipeline Execution
+
+![CD Pipeline - Deploy, Verify, DAST Passed](screenshots/CD.png)
 
 ### Pipeline Performance
 
