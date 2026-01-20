@@ -1,229 +1,282 @@
-name: CI Pipeline - Spendwise Backend
+# =============================================================================
+# SPENDWISE BACKEND - CONTINUOUS INTEGRATION PIPELINE
+# Purpose: Build, test, scan, and publish Docker image on every push
+# =============================================================================
 
-# ============================================================
-# CI PIPELINE TRIGGER
-# Purpose: Run CI on every push to main or PR
-# ============================================================
+name: CI Pipeline
+
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 env:
   NODE_VERSION: '20'
   DOCKER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/spendwise-server
 
-jobs:
-  # ============================================================
-  # CI PIPELINE JOB
-  # ============================================================
-  ci-pipeline:
-    runs-on: ubuntu-latest
-    
-    permissions:
-      contents: read
-      security-events: write
-      actions: read
+# =============================================================================
+# JOB STRUCTURE (Parallel where possible)
+# 
+# [Code Quality] ──┐
+# [SAST Scan]    ──┼──> [Build & Test] ──> [Container Build] ──> [Container Scan] ──> [Publish]
+# [SCA Scan]     ──┘
+# =============================================================================
 
+jobs:
+  # ---------------------------------------------------------------------------
+  # JOB 1: CODE QUALITY - Linting and static analysis
+  # ---------------------------------------------------------------------------
+  code-quality:
+    name: Code Quality Check
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ./server
     
     steps:
-    # ============================================================
-    # STAGE 1: CHECKOUT
-    # Purpose: Get source code from repository
-    # Why: Foundation for all subsequent pipeline stages
-    # ============================================================
-    - name: Checkout source code
-      uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-    # ============================================================
-    # STAGE 2: SETUP NODE.JS
-    # Purpose: Install Node.js runtime environment
-    # Why: Required to run npm commands and execute JavaScript
-    # ============================================================
-    - name: Setup Node.js ${{ env.NODE_VERSION }}
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ env.NODE_VERSION }}
-        cache: 'npm'
-        cache-dependency-path: server/package-lock.json
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
 
-    # ============================================================
-    # STAGE 3: INSTALL DEPENDENCIES
-    # Purpose: Install project dependencies using clean install
-    # Why: npm ci ensures reproducible builds from lockfile
-    # ============================================================
-    - name: Install dependencies
-      run: npm ci
+      - name: Install Dependencies
+        run: npm ci
 
-    # ============================================================
-    # STAGE 4: LINTING (Code Quality)
-    # Purpose: Check code style and quality standards
-    # Why: Prevents technical debt, ensures consistent code style
-    # ============================================================
-    - name: Run ESLint
-      run: npm run lint
+      - name: Run ESLint
+        run: npm run lint
 
-    # ============================================================
-    # STAGE 5: SAST - Static Application Security Testing
-    # Purpose: Analyze code for security vulnerabilities
-    # Why: Detects OWASP Top 10 vulnerabilities early
-    # ============================================================
-    - name: Initialize CodeQL
-      uses: github/codeql-action/init@v3
-      with:
-        languages: javascript
+  # ---------------------------------------------------------------------------
+  # JOB 2: SAST - Static Application Security Testing (CodeQL)
+  # ---------------------------------------------------------------------------
+  sast-scan:
+    name: SAST Security Scan
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-    - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v3
-      with:
-        category: "/language:javascript"
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
 
-    # ============================================================
-    # STAGE 6: SCA - Software Composition Analysis
-    # Purpose: Scan dependencies for known vulnerabilities
-    # Why: Supply chain security - detects vulnerable packages
-    # ============================================================
-    - name: Run npm audit (SCA)
-      run: npm audit --audit-level=high
-      continue-on-error: true
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript"
 
-    # ============================================================
-    # STAGE 7: UNIT TESTS
-    # Purpose: Run automated tests to verify code functionality
-    # Why: Prevents regressions, ensures code works as expected
-    # ============================================================
-    - name: Run unit tests with coverage
-      run: npm run test:coverage
-      env:
-        NODE_ENV: test
-        JWT_SECRET: test-secret
-        MONGODB_URI: mongodb://localhost:27017/test
+  # ---------------------------------------------------------------------------
+  # JOB 3: SCA - Software Composition Analysis (Dependency Scan)
+  # ---------------------------------------------------------------------------
+  sca-scan:
+    name: Dependency Security Scan
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./server
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-    - name: Upload coverage report
-      uses: actions/upload-artifact@v4
-      with:
-        name: coverage-report
-        path: server/coverage/
-        retention-days: 7
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
 
-    # ============================================================
-    # STAGE 8: BUILD VERIFICATION
-    # Purpose: Verify the application can start successfully
-    # Why: Catches runtime errors before containerization
-    # ============================================================
-    - name: Verify build
-      run: node --check index.js
+      - name: Install Dependencies
+        run: npm ci
 
-    # ============================================================
-    # STAGE 9: DOCKER BUILD
-    # Purpose: Create container image for deployment
-    # Why: Containers ensure consistent runtime across environments
-    # ============================================================
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      - name: Run npm Audit
+        run: npm audit --audit-level=high
 
-    - name: Login to DockerHub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
+  # ---------------------------------------------------------------------------
+  # JOB 4: BUILD & TEST - Unit tests with coverage
+  # ---------------------------------------------------------------------------
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    needs: [code-quality, sast-scan, sca-scan]
+    defaults:
+      run:
+        working-directory: ./server
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-    - name: Build Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: ./server
-        push: false
-        load: true
-        tags: |
-          ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
-          ${{ env.DOCKER_IMAGE }}:latest
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
 
-    # ============================================================
-    # STAGE 10: CONTAINER SCAN (Trivy)
-    # Purpose: Scan container image for OS/library vulnerabilities
-    # Why: Prevents deploying images with known CVEs
-    # ============================================================
-    - name: Run Trivy vulnerability scan
-      uses: aquasecurity/trivy-action@master
-      with:
-        image-ref: ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
-        format: 'sarif'
-        output: 'trivy-results.sarif'
-        severity: 'CRITICAL,HIGH'
-        exit-code: '0'
-      continue-on-error: true
+      - name: Install Dependencies
+        run: npm ci
 
-    - name: Upload Trivy scan results
-      uses: github/codeql-action/upload-sarif@v3
-      with:
-        sarif_file: 'trivy-results.sarif'
-      continue-on-error: true
+      - name: Run Unit Tests
+        run: npm test
+        env:
+          NODE_ENV: test
+          JWT_SECRET: test-secret-for-ci
+          MONGODB_URI: mongodb://localhost:27017/test
 
-    # ============================================================
-    # STAGE 11: CONTAINER RUNTIME TEST
-    # Purpose: Verify container runs and responds correctly
-    # Why: Smoke test before pushing to registry
-    # ============================================================
-    - name: Test container runtime
-      run: |
-        docker run -d --name test-container -p 3000:3000 \
-          -e NODE_ENV=test \
-          -e JWT_SECRET=test-secret \
-          -e MONGODB_URI=mongodb://localhost:27017/test \
-          ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
-        sleep 10
-        # Health check - must pass
-        curl -f http://localhost:3000/api/health || exit 1
-        echo "Container health check passed!"
-        docker logs test-container
-        docker stop test-container
+      - name: Verify Build
+        run: node --check index.js
 
-    # ============================================================
-    # STAGE 12: PUSH TO REGISTRY
-    # Purpose: Upload verified image to DockerHub
-    # Why: Makes image available for deployment
-    # ============================================================
-    - name: Push to DockerHub
-      uses: docker/build-push-action@v5
-      with:
-        context: ./server
-        push: true
-        tags: |
-          ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
-          ${{ env.DOCKER_IMAGE }}:latest
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+  # ---------------------------------------------------------------------------
+  # JOB 5: CONTAINER BUILD - Build Docker image
+  # ---------------------------------------------------------------------------
+  container-build:
+    name: Build Container Image
+    runs-on: ubuntu-latest
+    needs: [build-and-test]
+    outputs:
+      image-tag: ${{ github.sha }}
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-    # ============================================================
-    # STAGE 13: CI SUMMARY
-    # Purpose: Generate pipeline summary report
-    # ============================================================
-    - name: CI Pipeline Summary
-      run: |
-        echo "## CI Pipeline Completed" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
-        echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
-        echo "| Checkout | ✅ |" >> $GITHUB_STEP_SUMMARY
-        echo "| Setup Node.js | ✅ |" >> $GITHUB_STEP_SUMMARY
-        echo "| Install Dependencies | ✅ |" >> $GITHUB_STEP_SUMMARY
-        echo "| Linting | ✅ |" >> $GITHUB_STEP_SUMMARY
-        echo "| SAST (CodeQL) | ✅ |" >> $GITHUB_STEP_SUMMARY
-        echo "| SCA (npm audit) | ✅ |" >> $GITHUB_STEP_SUMMARY
-        echo "| Unit Tests | ✅ |" >> $GITHUB_STEP_SUMMARY
-        echo "| Build Verification | ✅ |" >> $GITHUB_STEP_SUMMARY
-        echo "| Docker Build | ✅ |" >> $GITHUB_STEP_SUMMARY
-        echo "| Container Scan (Trivy) | ✅ |" >> $GITHUB_STEP_SUMMARY
-        echo "| Container Test | ✅ |" >> $GITHUB_STEP_SUMMARY
-        echo "| Push to DockerHub | ✅ |" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Image:** \`${{ env.DOCKER_IMAGE }}:latest\`" >> $GITHUB_STEP_SUMMARY
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./server
+          push: false
+          load: true
+          tags: |
+            ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+            ${{ env.DOCKER_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test Container Runtime
+        run: |
+          docker run -d --name test-container -p 3000:3000 \
+            -e NODE_ENV=test \
+            -e JWT_SECRET=test-secret-for-ci \
+            -e MONGODB_URI=mongodb://localhost:27017/test \
+            ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+          sleep 15
+          curl -f http://localhost:3000/api/health || exit 1
+          echo "Container health check passed"
+          docker stop test-container
+
+  # ---------------------------------------------------------------------------
+  # JOB 6: CONTAINER SCAN - Scan image for vulnerabilities (Trivy)
+  # ---------------------------------------------------------------------------
+  container-scan:
+    name: Container Vulnerability Scan
+    runs-on: ubuntu-latest
+    needs: [container-build]
+    permissions:
+      security-events: write
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./server
+          push: false
+          load: true
+          tags: ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+
+      - name: Run Trivy Vulnerability Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+      - name: Upload Trivy Results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+        continue-on-error: true
+
+  # ---------------------------------------------------------------------------
+  # JOB 7: PUBLISH - Push verified image to DockerHub
+  # ---------------------------------------------------------------------------
+  publish:
+    name: Publish to Registry
+    runs-on: ubuntu-latest
+    needs: [container-scan]
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push Docker Image to Registry
+        uses: docker/build-push-action@v5
+        with:
+          context: ./server
+          push: true
+          tags: |
+            ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
+            ${{ env.DOCKER_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate CI Summary
+        run: |
+          echo "## CI Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Code Quality | Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| SAST Scan | Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| SCA Scan | Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build and Test | Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Container Build | Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Container Scan | Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Publish | Passed |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image Published:** \`${{ env.DOCKER_IMAGE }}:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
