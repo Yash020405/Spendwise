@@ -59,7 +59,7 @@ app.use('/api/ai', aiRoutes);
 app.get('/api/health', (req, res) => {
   res.json({
     success: true,
-    message: 'Server was running',
+    message: 'Server is running',
   });
 });
 

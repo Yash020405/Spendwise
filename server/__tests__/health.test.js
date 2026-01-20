@@ -19,7 +19,7 @@ app.use(express.json());
 app.get('/api/health', (req, res) => {
     res.json({
         success: true,
-        message: 'Server was running',
+        message: 'Server is running',
     });
 });
 
@@ -74,12 +74,12 @@ describe('Health Check API', () => {
     });
 
     test('Health check response should have success property', () => {
-        const mockResponse = { success: true, message: 'Server was running' };
+        const mockResponse = { success: true, message: 'Server is running' };
         expect(mockResponse.success).toBe(true);
     });
 
     test('Health check response should have message property', () => {
-        const mockResponse = { success: true, message: 'Server was running' };
+        const mockResponse = { success: true, message: 'Server is running' };
         expect(mockResponse.message).toBeDefined();
     });
 });
