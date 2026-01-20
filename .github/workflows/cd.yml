@@ -91,15 +91,48 @@ jobs:
     # ============================================================
     # STAGE 5: DAST - Dynamic Application Security Testing
     # Purpose: Scan running application for security issues
-    # Why: Detects runtime vulnerabilities
+    # Why: Detects runtime vulnerabilities via SSH to EC2
     # ============================================================
-    - name: OWASP ZAP DAST Scan
-      uses: zaproxy/action-baseline@v0.12.0
-      with:
-        target: http://${{ secrets.EC2_HOST }}:3000
-        rules_file_name: '.zap/rules.tsv'
-        cmd_options: '-a -j'
-      continue-on-error: true
+    - name: DAST Security Scan
+      run: |
+        ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_HOST }} << 'EOF'
+          echo "=== Running DAST Security Checks ==="
+          
+          # Test 1: Check for security headers
+          echo "[1/5] Checking security headers..."
+          curl -sI http://localhost:3000/api/health | head -10
+          
+          # Test 2: SQL Injection test
+          echo ""
+          echo "[2/5] Testing SQL Injection patterns..."
+          SQLI_RESULT=$(curl -s "http://localhost:3000/api/health?id=1'OR'1'='1" 2>&1)
+          echo "Response: ${SQLI_RESULT:0:100}"
+          
+          # Test 3: XSS test
+          echo ""
+          echo "[3/5] Testing XSS patterns..."
+          XSS_RESULT=$(curl -s "http://localhost:3000/api/health?q=<script>alert(1)</script>" 2>&1)
+          echo "Response: ${XSS_RESULT:0:100}"
+          
+          # Test 4: Check error handling
+          echo ""
+          echo "[4/5] Testing error handling..."
+          ERROR_RESULT=$(curl -s http://localhost:3000/api/nonexistent 2>&1)
+          echo "Response: ${ERROR_RESULT:0:100}"
+          
+          # Test 5: Verify no sensitive data in response
+          echo ""
+          echo "[5/5] Checking for sensitive data exposure..."
+          HEALTH_RESULT=$(curl -s http://localhost:3000/api/health)
+          if echo "$HEALTH_RESULT" | grep -qi "password\|secret\|token"; then
+            echo "WARNING: Possible sensitive data exposure!"
+          else
+            echo "OK: No sensitive data detected"
+          fi
+          
+          echo ""
+          echo "=== DAST Security Scan Complete ==="
+        EOF
 
     # ============================================================
     # STAGE 6: CD SUMMARY

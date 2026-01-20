@@ -21,25 +21,27 @@ provider "aws" {
 variable "key_name" {
   description = "AWS Key Pair name for SSH access"
   type        = string
-  default     = "devOps"
+  # No default - must be provided via terraform.tfvars or -var flag
 }
 
 variable "dockerhub_username" {
   description = "DockerHub username"
   type        = string
-  default     = "thetallinnov8r"
+  # No default - must be provided via terraform.tfvars or -var flag
 }
 
 variable "mongodb_uri" {
   description = "MongoDB connection string"
   type        = string
-  default     = "mongodb+srv://yashaga0204_db_user:4VTmqvGDWycaRZJ5@cluster0.ergxeka.mongodb.net/spendwise?retryWrites=true&w=majority"
+  sensitive   = true
+  # No default - must be provided via terraform.tfvars or -var flag
 }
 
 variable "jwt_secret" {
   description = "JWT Secret for authentication"
   type        = string
-  default     = "pocketexpense2025Sdjfndfdl@Atlsddfnsdflns75365431131zsdnakd556"
+  sensitive   = true
+  # No default - must be provided via terraform.tfvars or -var flag
 }
 
 # EC2 Instance with Minikube

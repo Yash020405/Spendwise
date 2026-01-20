@@ -69,7 +69,6 @@ jobs:
     # ============================================================
     - name: Run ESLint
       run: npm run lint
-      continue-on-error: true
 
     # ============================================================
     # STAGE 5: SAST - Static Application Security Testing
@@ -100,12 +99,19 @@ jobs:
     # Purpose: Run automated tests to verify code functionality
     # Why: Prevents regressions, ensures code works as expected
     # ============================================================
-    - name: Run unit tests
-      run: npm test
+    - name: Run unit tests with coverage
+      run: npm run test:coverage
       env:
         NODE_ENV: test
         JWT_SECRET: test-secret
         MONGODB_URI: mongodb://localhost:27017/test
+
+    - name: Upload coverage report
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: server/coverage/
+        retention-days: 7
 
     # ============================================================
     # STAGE 8: BUILD VERIFICATION
@@ -175,10 +181,11 @@ jobs:
           -e MONGODB_URI=mongodb://localhost:27017/test \
           ${{ env.DOCKER_IMAGE }}:${{ github.sha }}
         sleep 10
+        # Health check - must pass
         curl -f http://localhost:3000/api/health || exit 1
+        echo "Container health check passed!"
         docker logs test-container
         docker stop test-container
-      continue-on-error: true
 
     # ============================================================
     # STAGE 12: PUSH TO REGISTRY
