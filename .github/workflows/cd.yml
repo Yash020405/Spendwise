@@ -90,13 +90,16 @@ jobs:
             echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S')"
             echo ""
             
-            # Get the NodePort for accessing the service
-            NODE_PORT=$(kubectl get service spendwise-service -n spendwise -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo "30000")
+            # Wait for any terminating pods to complete
+            echo "Waiting for rollout to stabilize..."
+            kubectl rollout status deployment/spendwise-server -n spendwise --timeout=120s || true
+            sleep 10
+            
+            # Get the NodePort for accessing the service (correct service name)
+            NODE_PORT=$(kubectl get service spendwise-server -n spendwise -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo "30000")
             APP_URL="http://localhost:${NODE_PORT}"
             
             echo "Testing application at: ${APP_URL}"
-            echo "Waiting for application to be ready..."
-            sleep 5
             
             # Verify pod is running
             echo ""
@@ -111,13 +114,23 @@ jobs:
             fi
             echo ""
             
-            # Test 1: Health endpoint accessibility
+            # Test 1: Health endpoint accessibility with retry
             echo "=== Test 1: Health Check ==="
-            if curl -sf --max-time 10 "${APP_URL}/api/health" > /tmp/health_response.json; then
-              echo "✓ Health endpoint accessible"
-              echo "Response: $(cat /tmp/health_response.json)"
-            else
-              echo "✗ Health endpoint failed"
+            HEALTH_OK=false
+            for attempt in 1 2 3 4 5; do
+              echo "Health check attempt $attempt..."
+              if curl -sf --max-time 10 "${APP_URL}/api/health" > /tmp/health_response.json 2>/dev/null; then
+                echo "✓ Health endpoint accessible"
+                echo "Response: $(cat /tmp/health_response.json)"
+                HEALTH_OK=true
+                break
+              fi
+              echo "Attempt $attempt failed, waiting 10s..."
+              sleep 10
+            done
+            
+            if [ "$HEALTH_OK" != "true" ]; then
+              echo "✗ Health endpoint failed after 5 attempts"
               exit 1
             fi
             echo ""
