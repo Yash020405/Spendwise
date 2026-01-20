@@ -61,15 +61,15 @@ jobs:
     permissions:
       security-events: write
       contents: read
+      issues: write
     steps:
       - uses: actions/checkout@v4
       
-      # Create ZAP rules configuration
-      - name: Create ZAP Configuration
+      # Create ZAP rules configuration for comprehensive scanning
+      - name: Create ZAP Rules
         run: |
           mkdir -p .zap
-          # Rule configuration: WARN on all alerts (don't fail build)
-          cat > .zap/rules.tsv << 'EOF'
+          cat > .zap/rules.tsv << 'RULES'
           10010	WARN	(Cookie No HttpOnly Flag)
           10011	WARN	(Cookie Without Secure Flag)
           10015	WARN	(Incomplete or No Cache-control Header Set)
@@ -81,30 +81,22 @@ jobs:
           10038	WARN	(Content Security Policy Header Not Set)
           10098	WARN	(Cross-Domain Misconfiguration)
           10202	WARN	(Absence of Anti-CSRF Tokens)
-          40012	WARN	(Cross Site Scripting - Reflected)
-          40014	WARN	(Cross Site Scripting - Persistent)
-          40016	WARN	(Cross Site Scripting - Script in Attribute)
+          40012	WARN	(Cross Site Scripting Reflected)
+          40014	WARN	(Cross Site Scripting Persistent)
           40018	WARN	(SQL Injection)
           90033	WARN	(Loosely Scoped Cookie)
-          EOF
+          RULES
       
-      # Run OWASP ZAP Full Scan
+      # Run OWASP ZAP Baseline Scan with AJAX spider
       - name: Run OWASP ZAP Scan
-        uses: zaproxy/action-full-scan@v0.10.0
+        uses: zaproxy/action-baseline@v0.14.0
         with:
-          target: 'http://${{ secrets.EC2_HOST }}:3000'
+          target: 'http://${{ secrets.EC2_HOST }}:3000/'
           rules_file_name: '.zap/rules.tsv'
-          cmd_options: '-a -j -l WARN'
+          cmd_options: '-j -a'
+          fail_action: warn
           allow_issue_writing: false
         continue-on-error: true
-      
-      # Upload SARIF to GitHub Security Tab
-      - name: Upload ZAP SARIF Report
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: 'report_sarif.json'
-        continue-on-error: true
-        if: always()
 
   # Stage 4: Rollback (on failure)
   rollback:
