@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
     View,
     Text,
@@ -95,7 +95,7 @@ export default function RecurringScreen() {
             if (userData) {
                 setCurrencySymbol(JSON.parse(userData).currencySymbol || '₹');
             }
-        } catch (e) { }
+        } catch (_e) { }
     };
 
     const fetchRecurring = async () => {
@@ -112,12 +112,12 @@ export default function RecurringScreen() {
                     const merged = await getMergedRecurring();
                     setRecurring(merged);
                 }
-            } catch (error: any) {
+            } catch (_error: any) {
                 // Network error - use cached/merged data
                 const merged = await getMergedRecurring();
                 setRecurring(merged);
             }
-        } catch (error) {
+        } catch (_error) {
             // Failed to fetch recurring
         } finally {
             setLoading(false);
@@ -138,7 +138,7 @@ export default function RecurringScreen() {
                 });
                 fetchRecurring();
             }
-        } catch (error) {
+        } catch (_error) {
             showToast({ message: 'Failed to toggle', type: 'error' });
         }
     };
@@ -153,7 +153,7 @@ export default function RecurringScreen() {
                 showToast({ message: `${item.type} generated!`, type: 'success' });
                 fetchRecurring();
             }
-        } catch (error) {
+        } catch (_error) {
             showToast({ message: 'Failed to generate', type: 'error' });
         }
     };
@@ -177,7 +177,7 @@ export default function RecurringScreen() {
                                 showToast({ message: 'Deleted', type: 'success' });
                                 fetchRecurring();
                             }
-                        } catch (error) {
+                        } catch (_error) {
                             showToast({ message: 'Failed to delete', type: 'error' });
                         }
                     },
@@ -235,7 +235,7 @@ export default function RecurringScreen() {
                     showToast({ message: 'Failed to create recurring', type: 'error' });
                 }
             }
-        } catch (error) {
+        } catch (_error) {
             showToast({ message: 'Failed to create', type: 'error' });
         }
     };

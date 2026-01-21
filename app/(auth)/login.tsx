@@ -16,6 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../utils/ThemeContext';
 import { Button, Input, Card } from '../../components/ui';
 import api from '../../utils/api';
+import Logo from '../../components/Logo';
 
 export default function LoginScreen() {
   const { theme } = useTheme();
@@ -81,8 +82,8 @@ export default function LoginScreen() {
 
           {/* Header */}
           <View style={styles.header}>
-            <View style={[styles.logoContainer, { backgroundColor: theme.colors.primary }]}>
-              <MaterialIcons name="account-balance-wallet" size={40} color="#FFFFFF" />
+            <View style={styles.logoContainer}>
+              <Logo size={80} />
             </View>
             <Text style={[styles.appName, { color: theme.colors.text }]}>
               Welcome Back
@@ -116,7 +117,14 @@ export default function LoginScreen() {
                 error={errors.password}
               />
 
-              <TouchableOpacity style={styles.forgotPassword}>
+              <TouchableOpacity
+                style={styles.forgotPassword}
+                onPress={() => Alert.alert(
+                  'Reset Password',
+                  'Password reset functionality coming soon! Please contact support if you need immediate assistance.',
+                  [{ text: 'OK' }]
+                )}
+              >
                 <Text style={[styles.forgotPasswordText, { color: theme.colors.primary }]}>
                   Forgot Password?
                 </Text>
@@ -135,7 +143,7 @@ export default function LoginScreen() {
           {/* Register Link */}
           <View style={styles.footer}>
             <Text style={[styles.footerText, { color: theme.colors.textSecondary }]}>
-              Don't have an account?
+              Don&apos;t have an account?
             </Text>
             <Link href="/(auth)/register" asChild>
               <TouchableOpacity>
@@ -175,12 +183,9 @@ const styles = StyleSheet.create({
     marginBottom: 32,
   },
   logoContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 24,
+    marginBottom: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
   },
   appName: {
     fontSize: 28,

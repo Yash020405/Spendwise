@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,7 +6,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   RefreshControl,
-  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -18,8 +17,7 @@ import { Card } from '../../components/ui';
 import api from '../../utils/api';
 import AppWalkthrough from '../../components/AppWalkthrough';
 import { syncPendingExpenses, getPendingCount, cacheExpenses, getMergedExpenses } from '../../utils/offlineSync';
-
-const { width } = Dimensions.get('window');
+import { LoadingView } from '../../components/LoadingView';
 
 // Category colors and icons
 const CATEGORY_CONFIG: Record<string, { color: string; icon: string }> = {
@@ -73,8 +71,6 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [incomeList, setIncomeList] = useState<Income[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
   const [totalSpent, setTotalSpent] = useState(0);
   const [todaySpent, setTodaySpent] = useState(0);
@@ -103,7 +99,11 @@ export default function HomeScreen() {
           await cacheExpenses(expensesResponse.data);
         }
       } catch (err: any) {
-        // Network error - we'll use cached + offline data
+        // Show toast for rate limiting errors
+        if (err?.message?.includes('Too many requests') || err?.code === 5001) {
+          showToast({ message: 'Rate limited. Please wait a moment.', type: 'warning' });
+        }
+        // App will use cached + offline data for seamless UX
       }
 
       // Fetch income list
@@ -114,10 +114,13 @@ export default function HomeScreen() {
         const incomeData = incomeRes.data || incomeRes.income;
         if (incomeRes.success && Array.isArray(incomeData)) {
           fetchedIncome = incomeData;
-          setIncomeList(fetchedIncome);
-        } else {
         }
-      } catch (err) {
+      } catch (err: any) {
+        // Show toast for rate limiting errors
+        if (err?.message?.includes('Too many requests') || err?.code === 5001) {
+          showToast({ message: 'Rate limited. Please wait a moment.', type: 'warning' });
+        }
+        // Income fetch failed - will show expenses only
       }
 
       // Always use merged data (cached server + offline pending)
@@ -137,7 +140,11 @@ export default function HomeScreen() {
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
         const monthTotal = expenseList
           .filter((e: any) => new Date(e.date) >= monthStart)
-          .reduce((sum: number, e: any) => sum + e.amount, 0);
+          .reduce((sum: number, e: any) => {
+            // Use userShare for split expenses, otherwise use full amount
+            const effectiveAmount = e.isSplit ? (e.userShare || 0) : e.amount;
+            return sum + effectiveAmount;
+          }, 0);
         setTotalSpent(monthTotal);
 
         // Calculate today's total
@@ -145,7 +152,10 @@ export default function HomeScreen() {
         today.setHours(0, 0, 0, 0);
         const todayTotal = expenseList
           .filter((e: any) => new Date(e.date) >= today)
-          .reduce((sum: number, e: any) => sum + e.amount, 0);
+          .reduce((sum: number, e: any) => {
+            const effectiveAmount = e.isSplit ? (e.userShare || 0) : e.amount;
+            return sum + effectiveAmount;
+          }, 0);
         setTodaySpent(todayTotal);
 
         // Calculate week total
@@ -153,10 +163,13 @@ export default function HomeScreen() {
         weekAgo.setDate(weekAgo.getDate() - 7);
         const weekTotal = expenseList
           .filter((e: any) => new Date(e.date) >= weekAgo)
-          .reduce((sum: number, e: any) => sum + e.amount, 0);
+          .reduce((sum: number, e: any) => {
+            const effectiveAmount = e.isSplit ? (e.userShare || 0) : e.amount;
+            return sum + effectiveAmount;
+          }, 0);
         setWeekSpent(weekTotal);
-      } catch (mergeErr) {
-        console.error('Failed to merge transactions:', mergeErr);
+      } catch (_mergeErr) {
+        // Silent: Merge failed - user will see empty state which is acceptable
       }
 
       // Fetch income/expense balance
@@ -168,10 +181,12 @@ export default function HomeScreen() {
             setBalance(balanceRes.balance);
           }
         }
-      } catch (balanceErr) {
+      } catch (_balanceErr) {
+        // Silent: Balance fetch failed - non-critical, UI will handle null balance
       }
 
-    } catch (error) {
+    } catch (_error) {
+      // Silent: Main fetch failed - loading state will be cleared, empty UI shown
     } finally {
       setLoading(false);
     }
@@ -200,7 +215,7 @@ export default function HomeScreen() {
         // Refresh data to show new transactions
         fetchData();
       }
-    } catch (e) {
+    } catch (_e) {
       // Silent fail - not critical
     }
   };
@@ -236,7 +251,8 @@ export default function HomeScreen() {
                     });
                   }, 1000);
                 }
-              } catch (e) {
+              } catch (_e) {
+                // Silent: Budget warning check failed - non-critical feature
               }
             }
             const newCount = await getPendingCount();
@@ -250,8 +266,8 @@ export default function HomeScreen() {
         }
         setSyncing(false);
       }
-    } catch (e) {
-      console.error('Sync check failed:', e);
+    } catch (_e) {
+      // Silent: Sync check failed - syncing indicator will be cleared
       setSyncing(false);
     }
   };
@@ -279,33 +295,10 @@ export default function HomeScreen() {
   const budgetStatus = getBudgetStatus();
   const currencySymbol = user?.currencySymbol || '₹';
 
-  const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good Morning';
-    if (hour < 17) return 'Good Afternoon';
-    return 'Good Evening';
-  };
-
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-
-    if (date.toDateString() === today.toDateString()) return 'Today';
-    if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
-
   if (loading) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
-        <View style={styles.loadingContainer}>
-          <MaterialIcons name="account-balance-wallet" size={48} color={theme.colors.primary} />
-          <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>
-            Loading your finances...
-          </Text>
-        </View>
+        <LoadingView message="Loading your wallet..." />
       </SafeAreaView>
     );
   }
@@ -455,7 +448,7 @@ export default function HomeScreen() {
           <Card style={[styles.balanceCard, { backgroundColor: theme.colors.surface }] as any}>
             <View style={styles.balanceTop}>
               <View>
-                <Text style={[styles.balanceLabel, { color: theme.colors.textSecondary }]}>This Month's Balance</Text>
+                <Text style={[styles.balanceLabel, { color: theme.colors.textSecondary }]}>This Month&apos;s Balance</Text>
                 <Text style={[styles.balanceValue, { color: balance.netBalance >= 0 ? '#10B981' : '#EF4444' }]}>
                   {balance.netBalance >= 0 ? '+' : ''}{currencySymbol}{balance.netBalance.toLocaleString()}
                 </Text>
@@ -524,7 +517,10 @@ export default function HomeScreen() {
                   <View key={item._id}>
                     <TouchableOpacity
                       style={styles.activityItem}
-                      onPress={() => isIncome ? null : router.push({ pathname: '/(main)/edit-expense', params: { id: item._id } })}
+                      onPress={() => isIncome 
+                        ? router.push({ pathname: '/(main)/edit-income', params: { id: item._id } })
+                        : router.push({ pathname: '/(main)/edit-expense', params: { id: item._id } })
+                      }
                     >
                       <View style={[styles.activityIcon, { backgroundColor: config.color + '15' }]}>
                         <MaterialIcons name={config.icon as any} size={20} color={config.color} />
@@ -535,13 +531,14 @@ export default function HomeScreen() {
                         </Text>
                         <Text style={[styles.activitySubtitle, { color: theme.colors.textSecondary }]}>
                           {new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} • {isIncome ? 'Income' : (item as Expense).paymentMethod}
+                          {!isIncome && (item as any).isSplit ? ' • Split' : ''}
                         </Text>
                       </View>
                       <Text style={[
                         styles.activityAmount,
                         { color: isIncome ? '#10B981' : theme.colors.text }
                       ]}>
-                        {isIncome ? '+' : '-'}{currencySymbol}{item.amount.toLocaleString()}
+                        {isIncome ? '+' : '-'}{currencySymbol}{(!isIncome && (item as any).isSplit ? ((item as any).userShare || item.amount) : item.amount).toLocaleString()}
                       </Text>
                     </TouchableOpacity>
                     {index < recentTransactions.length - 1 && (

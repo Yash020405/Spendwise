@@ -14,7 +14,86 @@ const getApiUrl = () => {
 };
 
 const API_BASE_URL = getApiUrl();
-console.log('[API] Using URL:', API_BASE_URL);
+
+// API Error codes for client-side handling
+export const API_ERROR_CODES = {
+    // Authentication errors (1xxx)
+    AUTH_INVALID_CREDENTIALS: 1001,
+    AUTH_TOKEN_MISSING: 1002,
+    AUTH_TOKEN_INVALID: 1003,
+    AUTH_TOKEN_EXPIRED: 1004,
+    AUTH_USER_NOT_FOUND: 1005,
+    AUTH_EMAIL_EXISTS: 1006,
+    AUTH_WEAK_PASSWORD: 1007,
+
+    // Validation errors (2xxx)
+    VALIDATION_REQUIRED_FIELD: 2001,
+    VALIDATION_INVALID_AMOUNT: 2002,
+    VALIDATION_INVALID_DATE: 2003,
+
+    // Resource errors (3xxx)
+    RESOURCE_NOT_FOUND: 3001,
+    EXPENSE_NOT_FOUND: 3002,
+    INCOME_NOT_FOUND: 3003,
+
+    // Rate limiting (5xxx)
+    RATE_LIMIT_EXCEEDED: 5001,
+    AUTH_RATE_LIMIT: 5002,
+
+    // Server errors (6xxx)
+    SERVER_ERROR: 6001,
+
+    // Sync errors (8xxx)
+    SYNC_CONFLICT: 8001,
+    SYNC_FAILED: 8002,
+};
+
+// User-friendly error messages
+const ERROR_MESSAGES: Record<number, string> = {
+    [API_ERROR_CODES.AUTH_INVALID_CREDENTIALS]: 'Invalid email or password',
+    [API_ERROR_CODES.AUTH_TOKEN_EXPIRED]: 'Session expired. Please log in again.',
+    [API_ERROR_CODES.AUTH_EMAIL_EXISTS]: 'This email is already registered',
+    [API_ERROR_CODES.AUTH_WEAK_PASSWORD]: 'Password must be at least 6 characters',
+    [API_ERROR_CODES.RATE_LIMIT_EXCEEDED]: 'Too many requests. Please wait a moment.',
+    [API_ERROR_CODES.AUTH_RATE_LIMIT]: 'Too many login attempts. Try again later.',
+    [API_ERROR_CODES.SYNC_CONFLICT]: 'Sync conflict. Please refresh.',
+    [API_ERROR_CODES.SERVER_ERROR]: 'Something went wrong. Please try again.',
+};
+
+// Custom API Error class
+export class ApiError extends Error {
+    code: number;
+    type: string;
+    details?: any;
+
+    constructor(code: number, message: string, type: string = 'UNKNOWN', details?: any) {
+        super(message);
+        this.code = code;
+        this.type = type;
+        this.details = details;
+        this.name = 'ApiError';
+    }
+
+    // Check if this is an auth error requiring re-login
+    isAuthError(): boolean {
+        return this.code >= 1001 && this.code <= 1007;
+    }
+
+    // Check if this is a network/server error
+    isServerError(): boolean {
+        return this.code >= 6001 && this.code <= 6003;
+    }
+
+    // Check if this is a rate limit error
+    isRateLimitError(): boolean {
+        return this.code >= 5001 && this.code <= 5002;
+    }
+
+    // Get user-friendly message
+    getUserMessage(): string {
+        return ERROR_MESSAGES[this.code] || this.message || 'An unexpected error occurred';
+    }
+}
 
 interface RequestConfig {
     method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -49,7 +128,21 @@ class ApiService {
         const data = await response.json();
 
         if (!response.ok) {
-            throw new Error(data.message || 'Request failed');
+            // Handle structured error response
+            if (data.error && data.error.code) {
+                throw new ApiError(
+                    data.error.code,
+                    data.error.message || 'Request failed',
+                    data.error.type,
+                    data.error.details
+                );
+            }
+            // Fallback for legacy error format
+            throw new ApiError(
+                response.status >= 500 ? API_ERROR_CODES.SERVER_ERROR : 0,
+                data.message || 'Request failed',
+                'UNKNOWN'
+            );
         }
 
         return data;
@@ -357,6 +450,23 @@ class ApiService {
 
     async getSplitBalances(token: string) {
         return this.request('/expenses/split/balances', { token });
+    }
+
+    // Export endpoints
+    async getExportPDF(token: string, startDate: string, endDate: string) {
+        return this.request(`/export/pdf?startDate=${startDate}&endDate=${endDate}`, { token });
+    }
+
+    async getExportCSV(token: string, startDate: string, endDate: string): Promise<string> {
+        const response = await fetch(`${this.baseUrl}/export/csv?startDate=${startDate}&endDate=${endDate}&type=all`, {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+            },
+        });
+        if (!response.ok) {
+            throw new Error('Failed to export CSV');
+        }
+        return response.text();
     }
 }
 

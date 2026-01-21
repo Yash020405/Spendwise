@@ -1,6 +1,16 @@
 import express from 'express';
 import Expense from '../models/expense.model.js';
 import { protect } from '../middleware/auth.middleware.js';
+import {
+    sanitizeString,
+    sanitizeMongoId,
+    sanitizeNumber,
+    sanitizeBoolean,
+    sanitizeDate,
+    sanitizeParticipants,
+    sanitizeLocalId,
+    sanitizeQueryParams,
+} from '../utils/sanitize.js';
 
 const router = express.Router();
 
@@ -10,20 +20,29 @@ router.use(protect);
 // Create expense
 router.post('/', async (req, res) => {
     try {
-        const {
-            amount,
-            category,
-            categoryIcon,
-            paymentMethod,
-            description,
-            date,
-            localId,
-            // Split fields
-            isSplit,
-            splitType,
-            participants,
-            userShare,
-        } = req.body;
+        // Sanitize all inputs
+        const amount = sanitizeNumber(req.body.amount);
+        const category = sanitizeString(req.body.category);
+        const categoryIcon = sanitizeString(req.body.categoryIcon);
+        const paymentMethod = sanitizeString(req.body.paymentMethod);
+        const description = sanitizeString(req.body.description);
+        const date = sanitizeDate(req.body.date);
+        const localId = sanitizeLocalId(req.body.localId);
+        const isSplit = sanitizeBoolean(req.body.isSplit);
+        const splitType = sanitizeString(req.body.splitType);
+        const participants = sanitizeParticipants(req.body.participants);
+        const userShare = sanitizeNumber(req.body.userShare);
+        const payer = sanitizeString(req.body.payer);
+        const payerName = sanitizeString(req.body.payerName);
+        const userHasPaidShare = sanitizeBoolean(req.body.userHasPaidShare);
+
+        // Input validation
+        if (!amount || amount <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Amount must be a positive number',
+            });
+        }
 
         // Calculate totals for split expenses
         let totalOwed = 0;
@@ -35,7 +54,10 @@ router.post('/', async (req, res) => {
                 isPaid: p.isPaid || false,
                 paidAmount: p.paidAmount || 0,
             }));
-            totalOwed = processedParticipants.reduce((sum, p) => sum + (p.shareAmount || 0), 0);
+            const calculatedTotal = processedParticipants.reduce((sum, p) => sum + (p.shareAmount || 0), 0);
+            // If user is the payer, strict totalOwed is what others owe. If not, self owes userShare.
+            const isPayerMe = !payer || payer === 'me' || payer === req.user._id.toString();
+            totalOwed = isPayerMe ? calculatedTotal : 0;
         }
 
         const expense = await Expense.create({
@@ -51,7 +73,10 @@ router.post('/', async (req, res) => {
             isSplit: isSplit || false,
             splitType: splitType || 'equal',
             participants: processedParticipants,
+            payer: payer || req.user._id, // Default to user
+            payerName: payerName || 'You',
             userShare: userShare || (isSplit ? amount - totalOwed : amount),
+            userHasPaidShare: userHasPaidShare !== undefined ? userHasPaidShare : (payer === 'me' || !payer), // Default to true if I paid
             totalOwed,
             totalPaid: 0,
         });
@@ -71,9 +96,21 @@ router.post('/', async (req, res) => {
 // Get all expenses with filters
 router.get('/', async (req, res) => {
     try {
-        const { startDate, endDate, category, paymentMethod, page = 1, limit = 50 } = req.query;
+        // Sanitize all query parameters
+        const sanitizedQuery = sanitizeQueryParams(req.query);
+        const { startDate, endDate, category, paymentMethod, search, page = 1, limit = 50 } = sanitizedQuery;
 
         const query = { userId: req.user._id };
+
+        // Search filter - search in description and category
+        if (search) {
+            const sanitizedSearch = sanitizeString(search);
+            const searchRegex = { $regex: sanitizedSearch, $options: 'i' };
+            query.$or = [
+                { description: searchRegex },
+                { category: searchRegex },
+            ];
+        }
 
         if (startDate || endDate) {
             query.date = {};
@@ -81,8 +118,8 @@ router.get('/', async (req, res) => {
             if (endDate) query.date.$lte = new Date(endDate);
         }
 
-        if (category) query.category = category;
-        if (paymentMethod) query.paymentMethod = paymentMethod;
+        if (category) query.category = sanitizeString(category);
+        if (paymentMethod) query.paymentMethod = sanitizeString(paymentMethod);
 
         const skip = (parseInt(page) - 1) * parseInt(limit);
 
@@ -114,8 +151,16 @@ router.get('/', async (req, res) => {
 // Get single expense
 router.get('/:id', async (req, res) => {
     try {
+        const sanitizedId = sanitizeMongoId(req.params.id);
+        if (!sanitizedId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid expense ID',
+            });
+        }
+
         const expense = await Expense.findOne({
-            _id: req.params.id,
+            _id: sanitizedId,
             userId: req.user._id,
         });
 
@@ -141,19 +186,57 @@ router.get('/:id', async (req, res) => {
 // Update expense
 router.put('/:id', async (req, res) => {
     try {
-        const { amount, category, categoryIcon, paymentMethod, description, date } = req.body;
+        const sanitizedId = sanitizeMongoId(req.params.id);
+        if (!sanitizedId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid expense ID',
+            });
+        }
+
+        const { amount, category, categoryIcon, paymentMethod, description, date, isSplit, splitType, participants, userShare, payer, payerName, userHasPaidShare } = req.body;
+
+        console.log('PUT expense - Request body:', JSON.stringify(req.body, null, 2));
+        console.log('PUT expense - userHasPaidShare value:', userHasPaidShare, 'type:', typeof userHasPaidShare);
 
         // Sanitize update fields
         const updateFields = {};
         if (amount !== undefined && typeof amount === 'number') updateFields.amount = Number(amount);
-        if (category && typeof category === 'string') updateFields.category = String(category).trim();
-        if (categoryIcon && typeof categoryIcon === 'string') updateFields.categoryIcon = String(categoryIcon).trim();
-        if (paymentMethod && typeof paymentMethod === 'string') updateFields.paymentMethod = String(paymentMethod).trim();
-        if (description && typeof description === 'string') updateFields.description = String(description).trim().slice(0, 500);
+        if (category && typeof category === 'string') updateFields.category = sanitizeString(String(category).trim());
+        if (categoryIcon && typeof categoryIcon === 'string') updateFields.categoryIcon = sanitizeString(String(categoryIcon).trim());
+        if (paymentMethod && typeof paymentMethod === 'string') updateFields.paymentMethod = sanitizeString(String(paymentMethod).trim());
+        if (description && typeof description === 'string') updateFields.description = sanitizeString(String(description).trim().slice(0, 500));
         if (date) updateFields.date = new Date(date);
 
+        // Handle userHasPaidShare update (for marking user's share as paid when someone else paid)
+        if (userHasPaidShare !== undefined) {
+            updateFields.userHasPaidShare = Boolean(userHasPaidShare);
+            console.log('Setting userHasPaidShare to:', updateFields.userHasPaidShare);
+        }
+
+        // Handle split expense updates
+        if (isSplit !== undefined) {
+            updateFields.isSplit = Boolean(isSplit);
+            updateFields.splitType = sanitizeString(splitType) || 'equal';
+            if (participants && Array.isArray(participants)) {
+                updateFields.participants = sanitizeParticipants(participants).map(p => ({
+                    ...p,
+                    isPaid: p.isPaid || false,
+                    paidAmount: p.paidAmount || 0,
+                }));
+                const calculatedTotal = participants.reduce((sum, p) => sum + (p.shareAmount || 0), 0);
+                // Note: payer logic handled by frontend, we just store what's sent
+                updateFields.totalOwed = calculatedTotal;
+            }
+            if (userShare !== undefined) updateFields.userShare = Number(userShare);
+            if (payer !== undefined) updateFields.payer = sanitizeString(payer);
+            if (payerName !== undefined) updateFields.payerName = sanitizeString(payerName);
+        }
+
+        console.log('PUT expense - updateFields:', JSON.stringify(updateFields, null, 2));
+
         const expense = await Expense.findOneAndUpdate(
-            { _id: req.params.id, userId: req.user._id },
+            { _id: sanitizedId, userId: req.user._id },
             { $set: updateFields },
             { new: true, runValidators: true }
         );
@@ -164,6 +247,8 @@ router.put('/:id', async (req, res) => {
                 message: 'Expense not found',
             });
         }
+
+        console.log('PUT expense - Updated expense userHasPaidShare:', expense.userHasPaidShare);
 
         res.json({
             success: true,
@@ -180,8 +265,16 @@ router.put('/:id', async (req, res) => {
 // Delete expense
 router.delete('/:id', async (req, res) => {
     try {
+        const sanitizedId = sanitizeMongoId(req.params.id);
+        if (!sanitizedId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid expense ID',
+            });
+        }
+
         const expense = await Expense.findOneAndDelete({
-            _id: req.params.id,
+            _id: sanitizedId,
             userId: req.user._id,
         });
 
@@ -219,21 +312,39 @@ router.post('/sync', async (req, res) => {
         const results = [];
 
         for (const exp of expenses) {
+            // Sanitize each expense before processing
+            const sanitizedExp = {
+                amount: typeof exp.amount === 'number' ? Number(exp.amount) : 0,
+                category: sanitizeString(exp.category || ''),
+                categoryIcon: sanitizeString(exp.categoryIcon || ''),
+                paymentMethod: sanitizeString(exp.paymentMethod || ''),
+                description: sanitizeString(exp.description || ''),
+                date: exp.date ? new Date(exp.date) : new Date(),
+                localId: sanitizeString(exp.localId || ''),
+                isSplit: Boolean(exp.isSplit),
+                splitType: sanitizeString(exp.splitType || 'equal'),
+                participants: exp.participants ? sanitizeParticipants(exp.participants) : [],
+                userShare: typeof exp.userShare === 'number' ? Number(exp.userShare) : undefined,
+                payer: exp.payer ? sanitizeString(exp.payer) : undefined,
+                payerName: exp.payerName ? sanitizeString(exp.payerName) : undefined,
+                userHasPaidShare: exp.userHasPaidShare !== undefined ? Boolean(exp.userHasPaidShare) : undefined,
+            };
+
             // Check if expense with localId already exists
             const existing = await Expense.findOne({
                 userId: req.user._id,
-                localId: exp.localId,
+                localId: sanitizedExp.localId,
             });
 
             if (existing) {
-                results.push({ localId: exp.localId, status: 'exists', data: existing });
+                results.push({ localId: sanitizedExp.localId, status: 'exists', data: existing });
             } else {
                 const newExpense = await Expense.create({
-                    ...exp,
+                    ...sanitizedExp,
                     userId: req.user._id,
                     synced: true,
                 });
-                results.push({ localId: exp.localId, status: 'created', data: newExpense });
+                results.push({ localId: sanitizedExp.localId, status: 'created', data: newExpense });
             }
         }
 
@@ -593,10 +704,20 @@ router.get('/insights', async (req, res) => {
 // Update participant payment status
 router.put('/:id/participants/:participantId/payment', async (req, res) => {
     try {
+        const sanitizedExpenseId = sanitizeMongoId(req.params.id);
+        const sanitizedParticipantId = sanitizeMongoId(req.params.participantId);
+        
+        if (!sanitizedExpenseId || !sanitizedParticipantId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid expense ID or participant ID',
+            });
+        }
+
         const { isPaid, paidAmount } = req.body;
 
         const expense = await Expense.findOne({
-            _id: req.params.id,
+            _id: sanitizedExpenseId,
             userId: req.user._id,
             isSplit: true,
         });
@@ -608,7 +729,7 @@ router.put('/:id/participants/:participantId/payment', async (req, res) => {
             });
         }
 
-        const participant = expense.participants.id(req.params.participantId);
+        const participant = expense.participants.id(sanitizedParticipantId);
 
         if (!participant) {
             return res.status(404).json({
@@ -617,8 +738,8 @@ router.put('/:id/participants/:participantId/payment', async (req, res) => {
             });
         }
 
-        participant.isPaid = isPaid;
-        participant.paidAmount = paidAmount || (isPaid ? participant.shareAmount : 0);
+        participant.isPaid = Boolean(isPaid);
+        participant.paidAmount = typeof paidAmount === 'number' ? Number(paidAmount) : (isPaid ? participant.shareAmount : 0);
         participant.paidDate = isPaid ? new Date() : null;
 
         // Recalculate total paid

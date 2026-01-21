@@ -16,6 +16,7 @@ import { useTheme } from '../../utils/ThemeContext';
 import api from '../../utils/api';
 import { cacheExpenses, getMergedExpenses } from '../../utils/offlineSync';
 import SmartInsightsCard from '../../components/SmartInsightsCard';
+import { LoadingView } from '../../components/LoadingView';
 
 const { width } = Dimensions.get('window');
 
@@ -28,6 +29,19 @@ const CATEGORY_CONFIG: Record<string, { color: string; icon: string }> = {
     Health: { color: '#10B981', icon: 'local-hospital' },
     Education: { color: '#06B6D4', icon: 'school' },
     Other: { color: '#6B7280', icon: 'more-horiz' },
+};
+
+// Unique colors for income sources
+const INCOME_SOURCE_CONFIG: Record<string, { color: string; icon: string }> = {
+    Salary: { color: '#10B981', icon: 'payments' },
+    Freelance: { color: '#3B82F6', icon: 'laptop' },
+    Investment: { color: '#8B5CF6', icon: 'trending-up' },
+    Gift: { color: '#EC4899', icon: 'card-giftcard' },
+    Refund: { color: '#F59E0B', icon: 'replay' },
+    Bonus: { color: '#06B6D4', icon: 'stars' },
+    Rental: { color: '#EF4444', icon: 'home' },
+    Interest: { color: '#84CC16', icon: 'account-balance' },
+    Other: { color: '#6B7280', icon: 'attach-money' },
 };
 
 interface Expense {
@@ -104,7 +118,7 @@ export default function InsightsScreen() {
                 if (incResponse.success && Array.isArray(incResponse.data)) {
                     setIncomeList(incResponse.data);
                 }
-            } catch (error: any) {
+            } catch (_error: any) {
                 // Error fetching data - will use cached
             }
 
@@ -145,17 +159,25 @@ export default function InsightsScreen() {
         let total = 0;
         activeData.forEach((item: any) => {
             const cat = transactionType === 'expense' ? (item.category || 'Other') : (item.source || 'Other');
+            // Use userShare for split expenses, otherwise use full amount
+            const effectiveAmount = transactionType === 'expense' && item.isSplit 
+                ? (item.userShare || 0) 
+                : item.amount;
             const existing = map.get(cat) || { total: 0, count: 0 };
-            map.set(cat, { total: existing.total + item.amount, count: existing.count + 1 });
-            total += item.amount;
+            map.set(cat, { total: existing.total + effectiveAmount, count: existing.count + 1 });
+            total += effectiveAmount;
         });
         return Array.from(map.entries())
             .map(([name, data]) => ({
                 name,
                 ...data,
                 percentage: total > 0 ? (data.total / total) * 100 : 0,
-                color: transactionType === 'expense' ? (CATEGORY_CONFIG[name]?.color || '#6B7280') : '#10B981',
-                icon: transactionType === 'expense' ? (CATEGORY_CONFIG[name]?.icon || 'more-horiz') : 'trending-up',
+                color: transactionType === 'expense' 
+                    ? (CATEGORY_CONFIG[name]?.color || '#6B7280') 
+                    : (INCOME_SOURCE_CONFIG[name]?.color || '#6B7280'),
+                icon: transactionType === 'expense' 
+                    ? (CATEGORY_CONFIG[name]?.icon || 'more-horiz') 
+                    : (INCOME_SOURCE_CONFIG[name]?.icon || 'attach-money'),
             }))
             .sort((a, b) => b.total - a.total);
     }, [activeData, transactionType]);
@@ -167,12 +189,15 @@ export default function InsightsScreen() {
         const periods: { label: string; total: number }[] = [];
         const now = new Date();
 
+        // Helper to get effective amount (userShare for splits)
+        const getEffectiveAmount = (e: any) => e.isSplit ? (e.userShare || 0) : e.amount;
+
         if (mode === 'days') {
             for (let i = 6; i >= 0; i--) {
                 const d = new Date(now);
                 d.setDate(d.getDate() - i);
                 const total = expenses.filter(e => new Date(e.date).toDateString() === d.toDateString())
-                    .reduce((s, e) => s + e.amount, 0);
+                    .reduce((s, e) => s + getEffectiveAmount(e), 0);
                 periods.push({ label: d.toLocaleDateString('en-US', { weekday: 'short' }), total });
             }
         } else if (mode === 'months') {
@@ -181,14 +206,14 @@ export default function InsightsScreen() {
                 const total = expenses.filter(e => {
                     const ed = new Date(e.date);
                     return ed.getFullYear() === d.getFullYear() && ed.getMonth() === d.getMonth();
-                }).reduce((s, e) => s + e.amount, 0);
+                }).reduce((s, e) => s + getEffectiveAmount(e), 0);
                 periods.push({ label: d.toLocaleDateString('en-US', { month: 'short' }), total });
             }
         } else {
             for (let i = 2; i >= 0; i--) {
                 const year = now.getFullYear() - i;
                 const total = expenses.filter(e => new Date(e.date).getFullYear() === year)
-                    .reduce((s, e) => s + e.amount, 0);
+                    .reduce((s, e) => s + getEffectiveAmount(e), 0);
                 periods.push({ label: year.toString(), total });
             }
         }
@@ -200,12 +225,15 @@ export default function InsightsScreen() {
 
     // Period comparison
     const getPeriodTotal = (date: Date, mode: CompareMode) => {
+        // Helper to get effective amount (userShare for splits)
+        const getEffectiveAmount = (e: any) => e.isSplit ? (e.userShare || 0) : e.amount;
+        
         return expenses.filter(e => {
             const d = new Date(e.date);
             if (mode === 'days') return d.toDateString() === date.toDateString();
             if (mode === 'months') return d.getFullYear() === date.getFullYear() && d.getMonth() === date.getMonth();
             return d.getFullYear() === date.getFullYear();
-        }).reduce((s, e) => s + e.amount, 0);
+        }).reduce((s, e) => s + getEffectiveAmount(e), 0);
     };
 
     const period1Total = getPeriodTotal(comparePeriod1, compareMode);
@@ -247,7 +275,7 @@ export default function InsightsScreen() {
         const radius = size / 2 - 10;
 
         let startAngle = 0;
-        const slices = categoryData.map((cat, i) => {
+        const slices = categoryData.map((cat, _i) => {
             const angle = (cat.percentage / 100) * 360;
             const endAngle = startAngle + angle;
             const largeArc = angle > 180 ? 1 : 0;
@@ -459,10 +487,7 @@ export default function InsightsScreen() {
     if (loading) {
         return (
             <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
-                <View style={styles.loadingContainer}>
-                    <MaterialIcons name="insights" size={48} color={theme.colors.primary} />
-                    <Text style={[styles.loadingText, { color: theme.colors.textSecondary }]}>Loading insights...</Text>
-                </View>
+                <LoadingView message="Loading insights..." />
             </SafeAreaView>
         );
     }

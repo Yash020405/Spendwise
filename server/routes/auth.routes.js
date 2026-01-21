@@ -2,6 +2,7 @@ import express from "express";
 import User, { CURRENCIES } from "../models/user.model.js";
 import { generateToken } from "../utils/generateToken.js";
 import { protect } from "../middleware/auth.middleware.js";
+import { sanitizeString } from "../utils/sanitize.js";
 
 const router = express.Router();
 
@@ -33,8 +34,13 @@ router.post("/signup", async (req, res) => {
       });
     }
 
+    // Sanitize inputs
+    const sanitizedName = sanitizeString(name);
+    const sanitizedEmail = sanitizeString(email).toLowerCase();
+    const sanitizedCurrency = sanitizeString(currency || 'USD');
+
     // Check if user already exists
-    const userExists = await User.findOne({ email });
+    const userExists = await User.findOne({ email: sanitizedEmail });
 
     if (userExists) {
       return res.status(400).json({
@@ -45,10 +51,10 @@ router.post("/signup", async (req, res) => {
 
     // Create new user
     const user = await User.create({
-      name,
-      email,
+      name: sanitizedName,
+      email: sanitizedEmail,
       password,
-      currency: currency || 'USD',
+      currency: sanitizedCurrency,
     });
 
     // Generate JWT token
@@ -91,8 +97,11 @@ router.post("/login", async (req, res) => {
       });
     }
 
+    // Sanitize email before query
+    const sanitizedEmail = sanitizeString(email).toLowerCase();
+
     // Find user and include password
-    const user = await User.findOne({ email }).select("+password");
+    const user = await User.findOne({ email: sanitizedEmail }).select("+password");
 
     if (!user) {
       return res.status(401).json({
@@ -173,10 +182,10 @@ router.put("/me", protect, async (req, res) => {
 
     // Sanitize and validate each field explicitly
     if (name && typeof name === 'string') {
-      updateFields.name = String(name).trim().slice(0, 100);
+      updateFields.name = sanitizeString(String(name).trim().slice(0, 100));
     }
     if (currency && typeof currency === 'string' && CURRENCIES[currency]) {
-      updateFields.currency = String(currency);
+      updateFields.currency = sanitizeString(String(currency));
     }
     if (monthlyBudget !== undefined && typeof monthlyBudget === 'number') {
       updateFields.monthlyBudget = Number(monthlyBudget);

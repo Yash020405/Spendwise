@@ -19,6 +19,9 @@ export default [
                 fetch: 'readonly',
                 URL: 'readonly',
                 URLSearchParams: 'readonly',
+                AbortController: 'readonly',
+                setTimeout: 'readonly',
+                clearTimeout: 'readonly',
                 // Jest globals
                 describe: 'readonly',
                 test: 'readonly',

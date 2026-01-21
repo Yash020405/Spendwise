@@ -3,6 +3,7 @@ import RecurringTransaction from '../models/recurringTransaction.model.js';
 import Expense from '../models/expense.model.js';
 import Income from '../models/income.model.js';
 import { protect } from '../middleware/auth.middleware.js';
+import { sanitizeString, sanitizeMongoId, sanitizeQueryParams } from '../utils/sanitize.js';
 
 const router = express.Router();
 
@@ -14,10 +15,11 @@ router.use(protect);
 // @access  Private
 router.get('/', async (req, res) => {
     try {
-        const { type, isActive } = req.query;
+        const sanitizedQueryParams = sanitizeQueryParams(req.query);
+        const { type, isActive } = sanitizedQueryParams;
 
         const query = { userId: req.user._id };
-        if (type) query.type = type;
+        if (type) query.type = sanitizeString(type);
         if (isActive !== undefined) query.isActive = isActive === 'true';
 
         const recurring = await RecurringTransaction.find(query)
@@ -68,15 +70,15 @@ router.post('/', async (req, res) => {
 
         const recurring = await RecurringTransaction.create({
             userId: req.user._id,
-            type: type || 'expense',
-            amount,
-            category,
-            source,
-            paymentMethod,
-            description,
-            frequency: frequency || 'monthly',
-            dayOfMonth,
-            dayOfWeek,
+            type: sanitizeString(type || 'expense'),
+            amount: Number(amount),
+            category: sanitizeString(category || ''),
+            source: sanitizeString(source || ''),
+            paymentMethod: sanitizeString(paymentMethod || ''),
+            description: sanitizeString(description || ''),
+            frequency: sanitizeString(frequency || 'monthly'),
+            dayOfMonth: dayOfMonth ? Number(dayOfMonth) : undefined,
+            dayOfWeek: dayOfWeek ? Number(dayOfWeek) : undefined,
             startDate: start,
             endDate: endDate ? new Date(endDate) : undefined,
             nextDueDate,
@@ -100,6 +102,14 @@ router.post('/', async (req, res) => {
 // @access  Private
 router.put('/:id', async (req, res) => {
     try {
+        const sanitizedId = sanitizeMongoId(req.params.id);
+        if (!sanitizedId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid recurring transaction ID',
+            });
+        }
+
         // Sanitize and validate each field explicitly
         const allowedFields = {};
 
@@ -107,19 +117,19 @@ router.put('/:id', async (req, res) => {
             allowedFields.amount = Number(req.body.amount);
         }
         if (req.body.description && typeof req.body.description === 'string') {
-            allowedFields.description = String(req.body.description).trim().slice(0, 500);
+            allowedFields.description = sanitizeString(String(req.body.description).trim().slice(0, 500));
         }
         if (req.body.category && typeof req.body.category === 'string') {
-            allowedFields.category = String(req.body.category).trim();
+            allowedFields.category = sanitizeString(String(req.body.category).trim());
         }
         if (req.body.source && typeof req.body.source === 'string') {
-            allowedFields.source = String(req.body.source).trim();
+            allowedFields.source = sanitizeString(String(req.body.source).trim());
         }
         if (req.body.paymentMethod && typeof req.body.paymentMethod === 'string') {
-            allowedFields.paymentMethod = String(req.body.paymentMethod).trim();
+            allowedFields.paymentMethod = sanitizeString(String(req.body.paymentMethod).trim());
         }
         if (req.body.frequency && typeof req.body.frequency === 'string') {
-            allowedFields.frequency = String(req.body.frequency).trim();
+            allowedFields.frequency = sanitizeString(String(req.body.frequency).trim());
         }
         if (req.body.dayOfMonth !== undefined && typeof req.body.dayOfMonth === 'number') {
             allowedFields.dayOfMonth = Number(req.body.dayOfMonth);
@@ -129,7 +139,7 @@ router.put('/:id', async (req, res) => {
         }
 
         const recurring = await RecurringTransaction.findOneAndUpdate(
-            { _id: req.params.id, userId: req.user._id },
+            { _id: sanitizedId, userId: req.user._id },
             { $set: allowedFields },
             { new: true, runValidators: true }
         );
@@ -159,8 +169,16 @@ router.put('/:id', async (req, res) => {
 // @access  Private
 router.delete('/:id', async (req, res) => {
     try {
+        const sanitizedId = sanitizeMongoId(req.params.id);
+        if (!sanitizedId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid recurring transaction ID',
+            });
+        }
+
         const recurring = await RecurringTransaction.findOneAndDelete({
-            _id: req.params.id,
+            _id: sanitizedId,
             userId: req.user._id,
         });
 
@@ -189,8 +207,16 @@ router.delete('/:id', async (req, res) => {
 // @access  Private
 router.post('/:id/toggle', async (req, res) => {
     try {
+        const sanitizedId = sanitizeMongoId(req.params.id);
+        if (!sanitizedId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid recurring transaction ID',
+            });
+        }
+
         const recurring = await RecurringTransaction.findOne({
-            _id: req.params.id,
+            _id: sanitizedId,
             userId: req.user._id,
         });
 
@@ -223,8 +249,16 @@ router.post('/:id/toggle', async (req, res) => {
 // @access  Private
 router.post('/:id/generate', async (req, res) => {
     try {
+        const sanitizedId = sanitizeMongoId(req.params.id);
+        if (!sanitizedId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid recurring transaction ID',
+            });
+        }
+
         const recurring = await RecurringTransaction.findOne({
-            _id: req.params.id,
+            _id: sanitizedId,
             userId: req.user._id,
         });
 

@@ -41,7 +41,8 @@ app.post('/api/auth/register', (req, res) => {
         });
     }
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    // Use a linear-time email regex to avoid polynomial ReDoS
+    const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
     if (!emailRegex.test(email)) {
         return res.status(400).json({
             success: false,
@@ -165,9 +166,18 @@ describe('Input Validation Utilities', () => {
 
     const sanitizeInput = (input) => {
         if (typeof input !== 'string') return '';
-        // Remove script tags with their content, then other tags
-        let clean = input.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
-        clean = clean.replace(/<[^>]*>/g, '');
+        // Use a loop to fully remove nested/obfuscated script tags
+        let clean = input;
+        let prev;
+        do {
+            prev = clean;
+            clean = clean.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+        } while (clean !== prev);
+        // Remove all remaining HTML tags iteratively
+        do {
+            prev = clean;
+            clean = clean.replace(/<[^>]*>/g, '');
+        } while (clean !== prev);
         return clean.trim();
     };
 

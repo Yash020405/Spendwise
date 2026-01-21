@@ -2,10 +2,15 @@ import React from 'react';
 import { Tabs } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '../../utils/ThemeContext';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, Platform as _Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function MainLayout() {
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
+
+  // Calculate tab bar height based on safe area
+  const tabBarHeight = 60 + Math.max(insets.bottom, 10);
 
   return (
     <Tabs
@@ -15,8 +20,8 @@ export default function MainLayout() {
           backgroundColor: theme.colors.surface,
           borderTopColor: theme.colors.border,
           borderTopWidth: 0.5,
-          height: 75,
-          paddingBottom: 16,
+          height: tabBarHeight,
+          paddingBottom: Math.max(insets.bottom, 10),
           paddingTop: 8,
           position: 'absolute',
           bottom: 0,
@@ -89,6 +94,12 @@ export default function MainLayout() {
         }}
       />
       <Tabs.Screen
+        name="edit-income"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
         name="recurring"
         options={{
           href: null,
@@ -100,18 +111,24 @@ export default function MainLayout() {
           href: null,
         }}
       />
+      <Tabs.Screen
+        name="owes-dues"
+        options={{
+          href: null,
+        }}
+      />
     </Tabs>
   );
 }
 
 const styles = StyleSheet.create({
   addButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 20,
     shadowColor: '#6366F1',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,

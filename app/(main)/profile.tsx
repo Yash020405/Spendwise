@@ -15,7 +15,7 @@ import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../utils/ThemeContext';
 import { useToast } from '../../components/Toast';
-import { Card, Button } from '../../components/ui';
+import { Card } from '../../components/ui';
 import api from '../../utils/api';
 
 const CURRENCIES = [
@@ -37,7 +37,7 @@ interface User {
 }
 
 export default function ProfileScreen() {
-  const { theme, themeMode, setThemeMode, isDark } = useTheme();
+  const { theme, themeMode, setThemeMode, isDark: _isDark } = useTheme();
   const router = useRouter();
   const { showToast } = useToast();
 
@@ -57,7 +57,7 @@ export default function ProfileScreen() {
     try {
       const value = await AsyncStorage.getItem('@carry_over_budget');
       if (value !== null) setCarryOverBudget(value === 'true');
-    } catch (error) { }
+    } catch (_error) { /* Silent */ }
   };
 
   const toggleCarryOver = async (value: boolean) => {
@@ -73,8 +73,8 @@ export default function ProfileScreen() {
         setUser(parsed);
         setBudgetValue(parsed.monthlyBudget?.toString() || '');
       }
-    } catch (error) {
-      console.error('Failed to load user');
+    } catch (_error) {
+      // Silent: User load failed - loading state remains
     }
   };
 
@@ -310,6 +310,13 @@ export default function ProfileScreen() {
             QUICK ACCESS
           </Text>
           <Card style={styles.menuCard}>
+            <MenuItem
+              icon="group"
+              title="Owes & Dues"
+              subtitle="Track split expenses & payments"
+              onPress={() => router.push('/(main)/owes-dues' as any)}
+            />
+            <View style={[styles.divider, { backgroundColor: theme.colors.border }]} />
             <MenuItem
               icon="repeat"
               title="Recurring Transactions"

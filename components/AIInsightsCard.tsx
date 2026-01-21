@@ -23,11 +23,11 @@ interface AIInsightsCardProps {
     onRefresh?: () => void;
 }
 
-export default function AIInsightsCard({ onRefresh }: AIInsightsCardProps) {
+export default function AIInsightsCard({ onRefresh: _onRefresh }: AIInsightsCardProps) {
     const { theme } = useTheme();
     const [loading, setLoading] = useState(false);
     const [insights, setInsights] = useState<AIInsight[]>([]);
-    const [summary, setSummary] = useState<any>(null);
+    const [, setSummary] = useState<any>(null);
     const [error, setError] = useState<string | null>(null);
     const [timeRange, setTimeRange] = useState<'week' | 'month' | 'year'>('month');
 

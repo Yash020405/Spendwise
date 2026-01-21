@@ -4,14 +4,12 @@ import {
     Text,
     StyleSheet,
     TouchableOpacity,
-    Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '../../utils/ThemeContext';
-
-const { width } = Dimensions.get('window');
+import Logo from '../../components/Logo';
 
 export default function LandingScreen() {
     const { theme } = useTheme();
@@ -21,8 +19,8 @@ export default function LandingScreen() {
         <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
             {/* Hero Section */}
             <View style={styles.heroSection}>
-                <View style={[styles.logoContainer, { backgroundColor: theme.colors.primary }]}>
-                    <MaterialIcons name="account-balance-wallet" size={48} color="#FFFFFF" />
+                <View style={styles.logoContainer}>
+                    <Logo size={120} />
                 </View>
 
                 <Text style={[styles.appName, { color: theme.colors.text }]}>
@@ -85,17 +83,9 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     logoContainer: {
-        width: 100,
-        height: 100,
-        borderRadius: 28,
+        marginBottom: 20,
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: 20,
-        shadowColor: '#6366F1',
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.25,
-        shadowRadius: 12,
-        elevation: 8,
     },
     appName: {
         fontSize: 30,

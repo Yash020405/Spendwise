@@ -13,16 +13,17 @@ import budgetRoutes from './routes/budget.routes.js';
 import incomeRoutes from './routes/income.routes.js';
 import recurringRoutes from './routes/recurring.routes.js';
 import aiRoutes from './routes/ai.routes.js';
+import exportRoutes from './routes/export.routes.js';
 
 // Connect to database
 connectDB();
 
 const app = express();
 
-// Rate limiting - 100 requests per 15 minutes per IP
+// Rate limiting - 300 requests per 15 minutes per IP
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 300,
   message: { success: false, message: 'Too many requests, please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -31,7 +32,7 @@ const limiter = rateLimit({
 // Stricter rate limit for auth routes
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: 20,
   message: { success: false, message: 'Too many login attempts, please try again later.' },
 });
 
@@ -39,7 +40,7 @@ const authLimiter = rateLimit({
 app.use(helmet()); // Security headers
 app.use(limiter);
 app.use(cors({
-  origin: '*',
+  origin: process.env.CORS_ORIGIN || '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
@@ -54,6 +55,7 @@ app.use('/api/budgets', budgetRoutes);
 app.use('/api/income', incomeRoutes);
 app.use('/api/recurring', recurringRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/export', exportRoutes);
 
 // Health check route
 app.get('/api/health', (req, res) => {

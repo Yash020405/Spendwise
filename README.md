@@ -96,7 +96,7 @@ A modern expense tracking mobile application built with React Native and Expo.
 
 - React Native with Expo
 - Expo Router (file-based routing)
-- Redux Toolkit (state management)
+- React Context (state management)
 - AsyncStorage (local persistence)
 - TypeScript
 
@@ -128,7 +128,6 @@ Spendwise/
 │   └── _layout.tsx
 ├── components/           # Reusable components
 ├── utils/               # Utilities and API
-├── store/               # Redux store
 ├── server/              # Backend API
 │   ├── models/
 │   ├── routes/

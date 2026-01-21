@@ -9,6 +9,9 @@ const PENDING_RECURRING_KEY = '@pending_recurring';
 const CACHED_INCOME_KEY = '@cached_income';
 const CACHED_RECURRING_KEY = '@cached_recurring';
 
+const PENDING_INCOME_UPDATES_KEY = '@pending_income_updates';
+const PENDING_INCOME_DELETES_KEY = '@pending_income_deletes';
+
 interface PendingExpense {
   id: string;
   amount: number;
@@ -22,6 +25,9 @@ interface PendingExpense {
   splitType?: 'equal' | 'custom' | 'percentage';
   participants?: any[];
   userShare?: number;
+  payer?: string;
+  payerName?: string;
+  userHasPaidShare?: boolean; // Track if user has paid their share when someone else paid
 }
 
 interface PendingIncome {
@@ -125,6 +131,9 @@ export const syncPendingExpenses = async (token: string): Promise<{ synced: numb
         splitType: expense.splitType,
         participants: expense.participants,
         userShare: expense.userShare,
+        payer: expense.payer,
+        payerName: expense.payerName,
+        userHasPaidShare: expense.userHasPaidShare, // Include user paid share status
       });
       if (response.success) {
         successfulCreates.push(expense.id);
@@ -201,7 +210,11 @@ export const getPendingCount = async (): Promise<number> => {
   const expenses = await getPendingExpenses();
   const updates = await getPendingUpdates();
   const deletes = await getPendingDeletes();
-  return expenses.length + updates.length + deletes.length;
+  // Include income pending counts
+  const income = await getPendingIncome();
+  const incomeUpdates = await getPendingIncomeUpdates();
+  const incomeDeletes = await getPendingIncomeDeletes();
+  return expenses.length + updates.length + deletes.length + income.length + incomeUpdates.length + incomeDeletes.length;
 };
 
 // ============ SIMPLE EXPENSE CACHING ============
@@ -216,6 +229,15 @@ export const cacheExpenses = async (expenses: any[]): Promise<void> => {
 export const getCachedExpenses = async (): Promise<any[]> => {
   const data = await AsyncStorage.getItem(CACHED_EXPENSES_KEY);
   return data ? JSON.parse(data) : [];
+};
+
+// Update a single expense in cache
+export const updateCachedExpense = async (expenseId: string, updates: any): Promise<void> => {
+  const cached = await getCachedExpenses();
+  const updatedCache = cached.map((expense: any) => 
+    expense._id === expenseId ? { ...expense, ...updates } : expense
+  );
+  await cacheExpenses(updatedCache);
 };
 
 // Merge cached expenses with pending offline ones for display
@@ -248,6 +270,9 @@ export const getMergedExpenses = async (): Promise<any[]> => {
     splitType: p.splitType,
     participants: p.participants,
     userShare: p.userShare,
+    payer: p.payer,
+    payerName: p.payerName,
+    userHasPaidShare: p.userHasPaidShare, // Include user paid share status
   }));
 
   // Combine and sort by date descending
@@ -276,6 +301,39 @@ export const getPendingIncome = async (): Promise<PendingIncome[]> => {
   return data ? JSON.parse(data) : [];
 };
 
+// Get pending income updates
+export const getPendingIncomeUpdates = async (): Promise<PendingUpdate[]> => {
+  const data = await AsyncStorage.getItem(PENDING_INCOME_UPDATES_KEY);
+  return data ? JSON.parse(data) : [];
+};
+
+// Save pending income update
+export const savePendingIncomeUpdate = async (id: string, updateData: any): Promise<void> => {
+  const pending = await getPendingIncomeUpdates();
+  const existingIndex = pending.findIndex(p => p.id === id);
+  if (existingIndex >= 0) {
+    pending[existingIndex].data = { ...pending[existingIndex].data, ...updateData };
+  } else {
+    pending.push({ id, data: updateData });
+  }
+  await AsyncStorage.setItem(PENDING_INCOME_UPDATES_KEY, JSON.stringify(pending));
+};
+
+// Get pending income deletes
+export const getPendingIncomeDeletes = async (): Promise<string[]> => {
+  const data = await AsyncStorage.getItem(PENDING_INCOME_DELETES_KEY);
+  return data ? JSON.parse(data) : [];
+};
+
+// Save pending income delete
+export const savePendingIncomeDelete = async (id: string): Promise<void> => {
+  const pending = await getPendingIncomeDeletes();
+  if (!pending.includes(id)) {
+    pending.push(id);
+    await AsyncStorage.setItem(PENDING_INCOME_DELETES_KEY, JSON.stringify(pending));
+  }
+};
+
 // Cache income from server
 export const cacheIncome = async (income: any[]): Promise<void> => {
   await AsyncStorage.setItem(CACHED_INCOME_KEY, JSON.stringify(income));
@@ -291,6 +349,17 @@ export const getCachedIncome = async (): Promise<any[]> => {
 export const getMergedIncome = async (): Promise<any[]> => {
   const cached = await getCachedIncome();
   const pending = await getPendingIncome();
+  const pendingDeletes = await getPendingIncomeDeletes();
+  const pendingUpdates = await getPendingIncomeUpdates();
+
+  // Filter out deleted items
+  let merged = cached.filter((i: any) => !pendingDeletes.includes(i._id));
+
+  // Apply pending updates
+  merged = merged.map((income: any) => {
+    const update = pendingUpdates.find(u => u.id === income._id);
+    return update ? { ...income, ...update.data } : income;
+  });
 
   // Add pending offline income
   const offlineIncome = pending.map(p => ({
@@ -338,6 +407,48 @@ export const syncPendingIncome = async (token: string): Promise<{ synced: number
   if (successfulCreates.length > 0) {
     const remaining = pendingIncome.filter(i => !successfulCreates.includes(i.id));
     await AsyncStorage.setItem(PENDING_INCOME_KEY, JSON.stringify(remaining));
+  }
+
+  // Sync updates
+  const pendingUpdates = await getPendingIncomeUpdates();
+  const successfulUpdates: string[] = [];
+
+  for (const update of pendingUpdates) {
+    try {
+      const response: any = await api.updateIncome(token, update.id, update.data);
+      if (response.success) {
+        successfulUpdates.push(update.id);
+        synced++;
+      } else {
+        errors++;
+      }
+    } catch (e) {
+      errors++;
+    }
+  }
+
+  if (successfulUpdates.length > 0) {
+    const remaining = pendingUpdates.filter(u => !successfulUpdates.includes(u.id));
+    await AsyncStorage.setItem(PENDING_INCOME_UPDATES_KEY, JSON.stringify(remaining));
+  }
+
+  // Sync deletes
+  const pendingDeletes = await getPendingIncomeDeletes();
+  const successfulDeletes: string[] = [];
+
+  for (const id of pendingDeletes) {
+    try {
+      await api.deleteIncome(token, id);
+      successfulDeletes.push(id);
+      synced++;
+    } catch (e) {
+      errors++;
+    }
+  }
+
+  if (successfulDeletes.length > 0) {
+    const remaining = pendingDeletes.filter(id => !successfulDeletes.includes(id));
+    await AsyncStorage.setItem(PENDING_INCOME_DELETES_KEY, JSON.stringify(remaining));
   }
 
   return { synced, errors };

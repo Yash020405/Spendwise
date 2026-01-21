@@ -2,6 +2,7 @@ import express from 'express';
 import Budget from '../models/budget.model.js';
 import Expense from '../models/expense.model.js';
 import { protect } from '../middleware/auth.middleware.js';
+import { sanitizeString, sanitizeMongoId } from '../utils/sanitize.js';
 
 const router = express.Router();
 
@@ -16,15 +17,18 @@ router.post('/', async (req, res) => {
         const targetMonth = month || new Date().getMonth() + 1;
         const targetYear = year || new Date().getFullYear();
 
+        // Sanitize category
+        const sanitizedCategory = category ? sanitizeString(category) : null;
+
         // Upsert budget
         const budget = await Budget.findOneAndUpdate(
             {
                 userId: req.user._id,
-                category: category || null,
-                month: targetMonth,
-                year: targetYear,
+                category: sanitizedCategory,
+                month: parseInt(targetMonth),
+                year: parseInt(targetYear),
             },
-            { amount },
+            { amount: Number(amount) },
             { new: true, upsert: true, runValidators: true }
         );
 
@@ -68,6 +72,14 @@ router.get('/', async (req, res) => {
 // Update budget
 router.put('/:id', async (req, res) => {
     try {
+        const sanitizedId = sanitizeMongoId(req.params.id);
+        if (!sanitizedId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid budget ID',
+            });
+        }
+
         const { amount } = req.body;
 
         // Sanitize update fields
@@ -77,7 +89,7 @@ router.put('/:id', async (req, res) => {
         }
 
         const budget = await Budget.findOneAndUpdate(
-            { _id: req.params.id, userId: req.user._id },
+            { _id: sanitizedId, userId: req.user._id },
             { $set: updateFields },
             { new: true, runValidators: true }
         );
@@ -104,8 +116,16 @@ router.put('/:id', async (req, res) => {
 // Delete budget
 router.delete('/:id', async (req, res) => {
     try {
+        const sanitizedId = sanitizeMongoId(req.params.id);
+        if (!sanitizedId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid budget ID',
+            });
+        }
+
         const budget = await Budget.findOneAndDelete({
-            _id: req.params.id,
+            _id: sanitizedId,
             userId: req.user._id,
         });
 

@@ -1,11 +1,10 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     View,
     Text,
     StyleSheet,
     TouchableOpacity,
     ActivityIndicator,
-    ScrollView,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -29,7 +28,6 @@ export default function SmartInsightsCard({ selectedMonth }: SmartInsightsCardPr
     const [insights, setInsights] = useState<Insight[]>([]);
     const [summary, setSummary] = useState<any>(null);
     const [error, setError] = useState<string | null>(null);
-    const [expanded, setExpanded] = useState(true); // Default expanded for better visibility
 
     // Format month for display
     const getMonthLabel = () => {
@@ -84,13 +82,13 @@ export default function SmartInsightsCard({ selectedMonth }: SmartInsightsCardPr
                     setInsights(getOfflineFallbackInsights());
                     setSummary(null);
                 }
-            } catch (apiErr: any) {
+            } catch (_apiErr: any) {
                 // Network error or API failure - use offline fallback
                 setInsights(getOfflineFallbackInsights());
                 setSummary(null);
                 // Don't show error since we have fallback
             }
-        } catch (err: any) {
+        } catch (_err: any) {
             // Token or other error - show fallback anyway
             setInsights(getOfflineFallbackInsights());
             setSummary(null);

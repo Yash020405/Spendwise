@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
     View,
     Text,
@@ -74,8 +74,8 @@ export default function CategoriesScreen() {
             if (response.success) {
                 setCategories(response.data);
             }
-        } catch (error) {
-            console.error('Failed to fetch categories:', error);
+        } catch (_error) {
+            // Silent: Categories fetch failed - user sees loading/empty state
         } finally {
             setLoading(false);
             setRefreshing(false);
@@ -113,7 +113,7 @@ export default function CategoriesScreen() {
                 resetForm();
                 fetchCategories();
             }
-        } catch (error) {
+        } catch (_error) {
             showToast({ message: 'Failed to save', type: 'error' });
         }
     };
@@ -150,7 +150,7 @@ export default function CategoriesScreen() {
                                 showToast({ message: 'Deleted', type: 'success' });
                                 fetchCategories();
                             }
-                        } catch (error) {
+                        } catch (_error) {
                             showToast({ message: 'Failed to delete', type: 'error' });
                         }
                     },

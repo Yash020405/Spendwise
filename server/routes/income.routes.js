@@ -2,6 +2,7 @@ import express from 'express';
 import Income, { INCOME_SOURCES } from '../models/income.model.js';
 import Expense from '../models/expense.model.js';
 import { protect } from '../middleware/auth.middleware.js';
+import { sanitizeString, sanitizeMongoId, sanitizeQueryParams } from '../utils/sanitize.js';
 
 const router = express.Router();
 
@@ -23,7 +24,8 @@ router.get('/sources', (req, res) => {
 // @access  Private
 router.get('/', async (req, res) => {
     try {
-        const { startDate, endDate, source } = req.query;
+        const sanitizedQueryParams = sanitizeQueryParams(req.query);
+        const { startDate, endDate, source } = sanitizedQueryParams;
 
         const query = { userId: req.user._id };
 
@@ -36,7 +38,7 @@ router.get('/', async (req, res) => {
 
         // Source filter
         if (source) {
-            query.source = source;
+            query.source = sanitizeString(source);
         }
 
         const income = await Income.find(query)
@@ -48,7 +50,6 @@ router.get('/', async (req, res) => {
             count: income.length,
             data: income,
         });
-        console.log('📥 Income fetched for user', req.user._id, ':', income.length, 'entries');
     } catch (error) {
         res.status(500).json({
             success: false,
@@ -65,13 +66,21 @@ router.post('/', async (req, res) => {
     try {
         const { amount, source, description, date, localId } = req.body;
 
+        // Input validation
+        if (typeof amount !== 'number' || amount <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Amount must be a positive number',
+            });
+        }
+
         const income = await Income.create({
             userId: req.user._id,
-            amount,
-            source: source || 'Other',
-            description,
+            amount: Number(amount),
+            source: sanitizeString(source) || 'Other',
+            description: sanitizeString(description || ''),
             date: date || new Date(),
-            localId,
+            localId: sanitizeString(localId || ''),
         });
 
         res.status(201).json({
@@ -92,17 +101,25 @@ router.post('/', async (req, res) => {
 // @access  Private
 router.put('/:id', async (req, res) => {
     try {
+        const sanitizedId = sanitizeMongoId(req.params.id);
+        if (!sanitizedId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid income ID',
+            });
+        }
+
         const { amount, source, description, date } = req.body;
 
         // Sanitize update fields
         const updateFields = {};
         if (amount !== undefined && typeof amount === 'number') updateFields.amount = Number(amount);
-        if (source && typeof source === 'string') updateFields.source = String(source).trim();
-        if (description && typeof description === 'string') updateFields.description = String(description).trim().slice(0, 500);
+        if (source && typeof source === 'string') updateFields.source = sanitizeString(String(source).trim());
+        if (description && typeof description === 'string') updateFields.description = sanitizeString(String(description).trim().slice(0, 500));
         if (date) updateFields.date = new Date(date);
 
         const income = await Income.findOneAndUpdate(
-            { _id: req.params.id, userId: req.user._id },
+            { _id: sanitizedId, userId: req.user._id },
             { $set: updateFields },
             { new: true, runValidators: true }
         );
@@ -132,8 +149,16 @@ router.put('/:id', async (req, res) => {
 // @access  Private
 router.delete('/:id', async (req, res) => {
     try {
+        const sanitizedId = sanitizeMongoId(req.params.id);
+        if (!sanitizedId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid income ID',
+            });
+        }
+
         const income = await Income.findOneAndDelete({
-            _id: req.params.id,
+            _id: sanitizedId,
             userId: req.user._id,
         });
 
@@ -247,14 +272,15 @@ router.get('/balance', async (req, res) => {
             { $group: { _id: null, total: { $sum: '$amount' } } },
         ]);
 
-        // Get total expenses
-        const expenseResult = await Expense.aggregate([
-            { $match: { userId: req.user._id, ...dateQuery } },
-            { $group: { _id: null, total: { $sum: '$amount' } } },
-        ]);
+        // Get total expenses - use userShare for split expenses, otherwise use amount
+        const expenses = await Expense.find({ userId: req.user._id, ...dateQuery });
+        const totalExpenses = expenses.reduce((sum, exp) => {
+            // For split expenses, use userShare (user's portion), otherwise use full amount
+            const effectiveAmount = exp.isSplit ? (exp.userShare || 0) : exp.amount;
+            return sum + effectiveAmount;
+        }, 0);
 
         const totalIncome = incomeResult[0]?.total || 0;
-        const totalExpenses = expenseResult[0]?.total || 0;
         const netBalance = totalIncome - totalExpenses;
         const savingsRate = totalIncome > 0 ? ((netBalance / totalIncome) * 100).toFixed(1) : 0;
 

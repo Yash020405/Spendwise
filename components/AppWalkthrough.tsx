@@ -5,13 +5,10 @@ import {
     StyleSheet,
     TouchableOpacity,
     Modal,
-    Dimensions,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../utils/ThemeContext';
-
-const { width, height } = Dimensions.get('window');
 
 const WALKTHROUGH_STEPS = [
     {

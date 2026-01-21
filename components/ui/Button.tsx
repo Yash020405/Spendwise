@@ -8,6 +8,7 @@ import {
     TextStyle,
 } from 'react-native';
 import { useTheme } from '../../utils/ThemeContext';
+import { moderateScale, scaleFontSize, touchTarget } from '../../utils/responsive';
 
 interface ButtonProps {
     title: string;
@@ -69,26 +70,26 @@ export const Button: React.FC<ButtonProps> = ({
     const getPadding = () => {
         switch (size) {
             case 'sm':
-                return { paddingVertical: 8, paddingHorizontal: 16 };
+                return { paddingVertical: moderateScale(8), paddingHorizontal: moderateScale(16) };
             case 'md':
-                return { paddingVertical: 14, paddingHorizontal: 24 };
+                return { paddingVertical: moderateScale(14), paddingHorizontal: moderateScale(24) };
             case 'lg':
-                return { paddingVertical: 18, paddingHorizontal: 32 };
+                return { paddingVertical: moderateScale(18), paddingHorizontal: moderateScale(32) };
             default:
-                return { paddingVertical: 14, paddingHorizontal: 24 };
+                return { paddingVertical: moderateScale(14), paddingHorizontal: moderateScale(24) };
         }
     };
 
     const getFontSize = () => {
         switch (size) {
             case 'sm':
-                return 14;
+                return scaleFontSize(14);
             case 'md':
-                return 16;
+                return scaleFontSize(16);
             case 'lg':
-                return 18;
+                return scaleFontSize(18);
             default:
-                return 16;
+                return scaleFontSize(16);
         }
     };
 
@@ -103,7 +104,8 @@ export const Button: React.FC<ButtonProps> = ({
                     backgroundColor: getBackgroundColor(),
                     borderColor: variant === 'outline' ? theme.colors.primary : 'transparent',
                     borderWidth: variant === 'outline' ? 2 : 0,
-                    borderRadius: theme.borderRadius.md,
+                    borderRadius: moderateScale(theme.borderRadius.md),
+                    minHeight: touchTarget.minSize, // Ensure minimum touch target
                     ...getPadding(),
                 },
                 fullWidth && styles.fullWidth,
@@ -121,7 +123,7 @@ export const Button: React.FC<ButtonProps> = ({
                             {
                                 color: getTextColor(),
                                 fontSize: getFontSize(),
-                                marginLeft: icon ? 8 : 0,
+                                marginLeft: icon ? moderateScale(8) : 0,
                             },
                             textStyle,
                         ]}

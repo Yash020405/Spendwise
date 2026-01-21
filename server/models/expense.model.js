@@ -2,6 +2,9 @@ import mongoose from 'mongoose';
 
 // Participant schema for split expenses
 const participantSchema = new mongoose.Schema({
+  id: {
+    type: String, // Preserve the original local ID from the client
+  },
   name: {
     type: String,
     required: true,
@@ -85,8 +88,20 @@ const expenseSchema = new mongoose.Schema(
       default: 'equal',
     },
     participants: [participantSchema],
+    payer: {
+      type: String, // 'me' or participant's local ID
+      default: 'me',
+    },
+    payerName: {
+      type: String, // To store name if it's not the user (e.g. participant name)
+      default: 'You'
+    },
     userShare: {
       type: Number, // The current user's portion of the expense
+    },
+    userHasPaidShare: {
+      type: Boolean, // True if user has paid their share when someone else paid the bill
+      default: false, // Default to false - user hasn't paid until they mark it
     },
     totalOwed: {
       type: Number, // Total amount others owe the user

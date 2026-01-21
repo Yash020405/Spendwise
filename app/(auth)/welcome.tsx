@@ -11,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useTheme } from '../../utils/ThemeContext';
+import Logo from '../../components/Logo';
 
 const { width } = Dimensions.get('window');
 
@@ -110,9 +111,7 @@ export default function WelcomeScreen() {
             {/* Header with branding */}
             <View style={styles.header}>
                 <View style={styles.brandRow}>
-                    <View style={[styles.logoMini, { backgroundColor: theme.colors.primary }]}>
-                        <MaterialIcons name="account-balance-wallet" size={16} color="#FFFFFF" />
-                    </View>
+                    <Logo size={32} />
                     <Text style={[styles.brandName, { color: theme.colors.text }]}>
                         Spendwise
                     </Text>
@@ -171,7 +170,7 @@ export default function WelcomeScreen() {
                     </Text>
                 </TouchableOpacity>
             </View>
-        </SafeAreaView>
+        </SafeAreaView >
     );
 }
 
@@ -192,11 +191,9 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     logoMini: {
-        width: 28,
-        height: 28,
+        width: 32,
+        height: 32,
         borderRadius: 8,
-        alignItems: 'center',
-        justifyContent: 'center',
     },
     brandName: {
         fontSize: 16,

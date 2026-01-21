@@ -61,7 +61,7 @@ Spendwise is a personal finance management application that enables users to:
 ├────────────────────────────────────────────────────────────────────────┤
 │  React Native Mobile App (iOS/Android)                                 │
 │  - Expo framework                                                      │
-│  - Zustand state management                                            │
+│  - React Context state management                                      │
 │  - AsyncStorage for offline support                                    │
 └──────────────────────────────┬─────────────────────────────────────────┘
                                │ HTTPS

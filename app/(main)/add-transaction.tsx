@@ -12,15 +12,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../../utils/ThemeContext';
 import { useToast } from '../../components/Toast';
 import api from '../../utils/api';
 import { saveOfflineExpense, saveOfflineIncome, saveOfflineRecurring } from '../../utils/offlineSync';
-import { checkBudgetAfterExpense, getBudgetWarning } from '../../utils/budgetNotification';
 import SplitModal from '../../components/SplitModal';
 
 const CATEGORIES = [
@@ -95,6 +93,8 @@ export default function AddTransactionScreen() {
     const [splitType, setSplitType] = useState<'equal' | 'custom' | 'percentage'>('equal');
     const [participants, setParticipants] = useState<any[]>([]);
     const [userShare, setUserShare] = useState(0);
+    const [payer, setPayer] = useState('me');
+    const [userHasPaidShare, setUserHasPaidShare] = useState(false); // Default to false - user hasn't paid until they explicitly mark it
 
     // Recurring transaction state
     const [isRecurring, setIsRecurring] = useState(false);
@@ -114,6 +114,8 @@ export default function AddTransactionScreen() {
             setIsSplit(false);
             setParticipants([]);
             setUserShare(0);
+            setPayer('me');
+            setUserHasPaidShare(false); // Reset - user hasn't paid their share yet
             // Reset recurring state
             setIsRecurring(false);
             setRecurringFrequency('monthly');
@@ -130,8 +132,8 @@ export default function AddTransactionScreen() {
             if (userData) {
                 setCurrencySymbol(JSON.parse(userData).currencySymbol || '₹');
             }
-        } catch (error) {
-            console.error('Failed to load user currency');
+        } catch (_error) {
+            // Silent: Currency load failed - will use default ₹ symbol
         }
     };
 
@@ -145,11 +147,14 @@ export default function AddTransactionScreen() {
     };
 
     // Handle split expense save
-    const handleSplitSave = (splitParticipants: any[], type: 'equal' | 'custom' | 'percentage', share: number) => {
+    const handleSplitSave = (splitParticipants: any[], type: 'equal' | 'custom' | 'percentage', share: number, whoPaid: string, userHasPaid: boolean) => {
         setParticipants(splitParticipants);
         setSplitType(type);
         setUserShare(share);
-        setIsSplit(splitParticipants.length > 0);
+        // Consider it a split if there are participants OR if someone else paid
+        setIsSplit(splitParticipants.length > 0 || whoPaid !== 'me');
+        setPayer(whoPaid);
+        setUserHasPaidShare(userHasPaid);
     };
 
     const handleSubmit = async () => {
@@ -239,7 +244,12 @@ export default function AddTransactionScreen() {
                     splitType: isSplit ? splitType : undefined,
                     participants: isSplit ? participants : undefined,
                     userShare: isSplit ? userShare : undefined,
+                    payer: isSplit ? payer : undefined,
+                    payerName: isSplit ? (payer === 'me' ? 'You' : participants.find(p => p.id === payer)?.name) : undefined,
+                    userHasPaidShare: isSplit ? userHasPaidShare : undefined, // Track if user has settled when someone else paid
                 };
+
+                console.log('Saving expense data:', JSON.stringify(expenseData, null, 2));
 
                 try {
                     const response: any = await api.createExpense(token, expenseData);
@@ -278,20 +288,87 @@ export default function AddTransactionScreen() {
                         showToast({ message: response.message || 'Failed to save expense', type: 'error' });
                     }
                 } catch (error: any) {
+                    console.error('Expense save error:', error);
                     if (error.message?.includes('Network')) {
                         await saveOfflineExpense({ ...expenseData, category: selectedCategory! });
                         showToast({ message: 'Saved offline', type: 'success' });
                         router.back();
                     } else {
-                        showToast({ message: 'Failed to save expense', type: 'error' });
+                        showToast({ message: error.message || 'Failed to save expense', type: 'error' });
                     }
                 }
             }
         } catch (error: any) {
-            console.error('Failed to add transaction:', error);
-            showToast({ message: 'Failed to save', type: 'error' });
+            console.error('Submit error:', error);
+            showToast({ message: error.message || 'Failed to save', type: 'error' });
         } finally {
             setLoading(false);
+        }
+    };
+
+
+    // Safe mathematical expression evaluator (no eval/Function)
+    const safeEvaluate = (expr: string): number | null => {
+        try {
+            // Remove whitespace
+            expr = expr.replace(/\s/g, '');
+            // Validate - only allow numbers, operators, parentheses, decimal points
+            if (!/^[\d+\-*/().]+$/.test(expr)) return null;
+
+            // Tokenize
+            const tokens: (number | string)[] = [];
+            let numBuffer = '';
+
+            for (let i = 0; i < expr.length; i++) {
+                const char = expr[i];
+                if (/[\d.]/.test(char)) {
+                    numBuffer += char;
+                } else {
+                    if (numBuffer) {
+                        tokens.push(parseFloat(numBuffer));
+                        numBuffer = '';
+                    }
+                    tokens.push(char);
+                }
+            }
+            if (numBuffer) tokens.push(parseFloat(numBuffer));
+
+            // Simple recursive descent parser
+            let pos = 0;
+
+            const parseExpression = (): number => {
+                let result = parseTerm();
+                while (pos < tokens.length && (tokens[pos] === '+' || tokens[pos] === '-')) {
+                    const op = tokens[pos++];
+                    const right = parseTerm();
+                    result = op === '+' ? result + right : result - right;
+                }
+                return result;
+            };
+
+            const parseTerm = (): number => {
+                let result = parseFactor();
+                while (pos < tokens.length && (tokens[pos] === '*' || tokens[pos] === '/')) {
+                    const op = tokens[pos++];
+                    const right = parseFactor();
+                    result = op === '*' ? result * right : result / right;
+                }
+                return result;
+            };
+
+            const parseFactor = (): number => {
+                if (tokens[pos] === '(') {
+                    pos++;
+                    const result = parseExpression();
+                    pos++; // skip ')'
+                    return result;
+                }
+                return tokens[pos++] as number;
+            };
+
+            return parseExpression();
+        } catch {
+            return null;
         }
     };
 
@@ -301,12 +378,10 @@ export default function AddTransactionScreen() {
         } else if (btn === 'DEL') {
             setCalcDisplay(prev => prev.length > 1 ? prev.slice(0, -1) : '0');
         } else if (btn === '=') {
-            try {
-                const result = Function('"use strict"; return (' + calcDisplay + ')')();
-                if (typeof result === 'number' && isFinite(result)) {
-                    setCalcDisplay(String(parseFloat(result.toFixed(2))));
-                }
-            } catch {
+            const result = safeEvaluate(calcDisplay);
+            if (result !== null && isFinite(result)) {
+                setCalcDisplay(String(parseFloat(result.toFixed(2))));
+            } else {
                 setCalcDisplay('Error');
             }
         } else {
@@ -365,7 +440,7 @@ export default function AddTransactionScreen() {
                     </TouchableOpacity>
                 </View>
 
-                <ScrollView style={styles.content} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+                <ScrollView style={styles.content} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
                     {/* Type Toggle */}
                     <View style={[styles.typeToggle, { backgroundColor: theme.colors.surface }]}>
                         <TouchableOpacity
@@ -489,14 +564,16 @@ export default function AddTransactionScreen() {
                                     <View style={[styles.iconBox, { backgroundColor: '#8B5CF6' + '20' }]}>
                                         <MaterialIcons name="group" size={20} color="#8B5CF6" />
                                     </View>
-                                    <Text style={[styles.selectorText, { color: isSplit ? theme.colors.text : theme.colors.textTertiary }]}>
-                                        {isSplit ? `Split with ${participants.length} ${participants.length === 1 ? 'person' : 'people'}` : 'Not splitting'}
+                                    <Text style={[styles.selectorText, { color: isSplit && participants.length > 0 ? theme.colors.text : theme.colors.textTertiary }]}>
+                                        {isSplit && participants.length > 0 
+                                            ? `Split with ${participants.length} ${participants.length === 1 ? 'person' : 'people'}` 
+                                            : 'Split this expense'}
                                     </Text>
                                 </View>
                                 <MaterialIcons name="keyboard-arrow-right" size={24} color={theme.colors.textSecondary} />
                             </TouchableOpacity>
 
-                            {/* Show split summary */}
+                            {/* Show split summary only when actually split */}
                             {isSplit && participants.length > 0 && (
                                 <View style={[styles.splitSummary, { backgroundColor: '#8B5CF6' + '10' }]}>
                                     <Text style={[styles.splitSummaryText, { color: theme.colors.text }]}>
@@ -583,6 +660,10 @@ export default function AddTransactionScreen() {
                     onClose={() => setShowSplitModal(false)}
                     totalAmount={parseFloat(amount) || 0}
                     currencySymbol={currencySymbol}
+                    initialPayer={payer}
+                    initialParticipants={participants}
+                    initialSplitType={splitType}
+                    initialUserHasPaid={userHasPaidShare}
                     onSave={handleSplitSave}
                 />
 

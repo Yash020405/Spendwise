@@ -2,6 +2,7 @@ import express from 'express';
 import Expense from '../models/expense.model.js';
 import Income from '../models/income.model.js';
 import { protect } from '../middleware/auth.middleware.js';
+import { sanitizeString } from '../utils/sanitize.js';
 
 const router = express.Router();
 
@@ -16,23 +17,21 @@ router.post('/insights', async (req, res) => {
         const { timeRange = 'month', month, year } = req.body;
         const now = new Date();
 
-        console.log('📊 AI Insights Request:', { timeRange, month, year, userId: req.user._id });
+        // Sanitize timeRange
+        const sanitizedTimeRange = sanitizeString(timeRange || 'month');
 
         // Determine date range - use UTC to match MongoDB storage
         let startDate, endDate;
 
         if (month !== undefined && year !== undefined) {
             // Specific month target - use UTC dates
-            startDate = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
-            endDate = new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999));
-            console.log('📅 Date range (UTC):', {
-                startDate: startDate.toISOString(),
-                endDate: endDate.toISOString(),
-                monthName: new Date(year, month).toLocaleString('default', { month: 'long', year: 'numeric' })
-            });
+            const sanitizedMonth = parseInt(month);
+            const sanitizedYear = parseInt(year);
+            startDate = new Date(Date.UTC(sanitizedYear, sanitizedMonth, 1, 0, 0, 0, 0));
+            endDate = new Date(Date.UTC(sanitizedYear, sanitizedMonth + 1, 0, 23, 59, 59, 999));
         } else {
             // Rolling time range target
-            switch (timeRange) {
+            switch (sanitizedTimeRange) {
                 case 'week':
                     startDate = new Date(now);
                     startDate.setDate(startDate.getDate() - 7);
@@ -58,20 +57,21 @@ router.post('/insights', async (req, res) => {
             date: { $gte: startDate, $lte: endDate },
         });
 
-        console.log('📋 Found', expenses.length, 'expenses, total:', expenses.reduce((s, e) => s + e.amount, 0));
-        console.log('📋 Found', income.length, 'income entries, total:', income.reduce((s, i) => s + i.amount, 0));
+        // Helper to get effective amount (userShare for splits, full amount otherwise)
+        const getEffectiveAmount = (e) => e.isSplit ? (e.userShare || 0) : e.amount;
 
-        // Calculate summaries
-        const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+        // Calculate summaries using userShare for split expenses
+        const totalExpenses = expenses.reduce((sum, e) => sum + getEffectiveAmount(e), 0);
         const totalIncome = income.reduce((sum, i) => sum + i.amount, 0);
 
-        // Category breakdown with counts
+        // Category breakdown with counts - using effective amounts
         const categoryDetails = {};
         expenses.forEach(e => {
+            const effectiveAmount = getEffectiveAmount(e);
             if (!categoryDetails[e.category]) {
                 categoryDetails[e.category] = { total: 0, count: 0, notes: [] };
             }
-            categoryDetails[e.category].total += e.amount;
+            categoryDetails[e.category].total += effectiveAmount;
             categoryDetails[e.category].count += 1;
             if (e.description) {
                 categoryDetails[e.category].notes.push(e.description);
@@ -88,19 +88,19 @@ router.post('/insights', async (req, res) => {
             incomeDetails[i.source].count += 1;
         });
 
-        // Day of week analysis
+        // Day of week analysis - using effective amounts
         const dayOfWeekTotals = [0, 0, 0, 0, 0, 0, 0]; // Sun-Sat
         expenses.forEach(e => {
             const day = new Date(e.date).getDay();
-            dayOfWeekTotals[day] += e.amount;
+            dayOfWeekTotals[day] += getEffectiveAmount(e);
         });
 
-        // Recent transactions (top 10 by amount)
+        // Recent transactions (top 10 by effective amount)
         const topExpenses = [...expenses]
-            .sort((a, b) => b.amount - a.amount)
+            .sort((a, b) => getEffectiveAmount(b) - getEffectiveAmount(a))
             .slice(0, 10)
             .map(e => ({
-                amount: e.amount,
+                amount: getEffectiveAmount(e),
                 category: e.category,
                 note: e.description || '',
                 date: new Date(e.date).toLocaleDateString()
@@ -120,7 +120,6 @@ router.post('/insights', async (req, res) => {
             timeRange,
             currency: req.user.currency || 'INR',
         };
-        console.log('🤖 AI Prompt Data:', JSON.stringify(promptData, null, 2));
         const prompt = buildInsightPrompt(promptData);
 
         // Check if OpenRouter API key is configured
@@ -151,7 +150,10 @@ router.post('/insights', async (req, res) => {
             });
         }
 
-        // Call OpenRouter API
+        // Call OpenRouter API with timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
         const aiResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -186,7 +188,10 @@ Return ONLY a JSON array (no other text) with 3-5 insight objects. Each object m
                 ],
                 max_tokens: 400,
             }),
+            signal: controller.signal,
         });
+
+        clearTimeout(timeoutId);
 
         if (!aiResponse.ok) {
             throw new Error('AI service temporarily unavailable');

@@ -47,7 +47,11 @@ export const calculateMonthlySpending = (expenses: any[]): number => {
             const expenseDate = new Date(e.date);
             return expenseDate >= startOfMonth && expenseDate.getFullYear() === now.getFullYear() && expenseDate.getMonth() === now.getMonth();
         })
-        .reduce((sum, e) => sum + (e.amount || 0), 0);
+        .reduce((sum, e) => {
+            // Use userShare for split expenses, otherwise use full amount
+            const effectiveAmount = e.isSplit ? (e.userShare || 0) : (e.amount || 0);
+            return sum + effectiveAmount;
+        }, 0);
 };
 
 // Get budget status

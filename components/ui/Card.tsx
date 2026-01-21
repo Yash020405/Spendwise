@@ -1,6 +1,7 @@
 import React from 'react';
-import { View, StyleSheet, ViewStyle } from 'react-native';
+import { View, ViewStyle } from 'react-native';
 import { useTheme } from '../../utils/ThemeContext';
+import { moderateScale, cardDimensions } from '../../utils/responsive';
 
 interface CardProps {
     children: React.ReactNode;
@@ -22,20 +23,20 @@ export const Card: React.FC<CardProps> = ({
             case 'none':
                 return 0;
             case 'sm':
-                return theme.spacing.sm;
+                return moderateScale(theme.spacing.sm);
             case 'md':
-                return theme.spacing.md;
+                return moderateScale(theme.spacing.md);
             case 'lg':
-                return theme.spacing.lg;
+                return moderateScale(theme.spacing.lg);
             default:
-                return theme.spacing.md;
+                return moderateScale(theme.spacing.md);
         }
     };
 
     const getStyles = (): ViewStyle => {
         const baseStyle: ViewStyle = {
             backgroundColor: theme.colors.surface,
-            borderRadius: theme.borderRadius.lg,
+            borderRadius: cardDimensions.borderRadius,
             padding: getPadding(),
         };
 
@@ -67,5 +68,3 @@ export const Card: React.FC<CardProps> = ({
 
     return <View style={[getStyles(), style]}>{children}</View>;
 };
-
-const styles = StyleSheet.create({});
