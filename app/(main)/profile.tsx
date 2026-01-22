@@ -34,6 +34,7 @@ interface User {
   currency: string;
   currencySymbol: string;
   monthlyBudget: number;
+  upiId?: string;
 }
 
 export default function ProfileScreen() {
@@ -47,6 +48,8 @@ export default function ProfileScreen() {
   const [budgetValue, setBudgetValue] = useState('');
   const [saving, setSaving] = useState(false);
   const [carryOverBudget, setCarryOverBudget] = useState(false);
+  const [showUpiInput, setShowUpiInput] = useState(false);
+  const [upiValue, setUpiValue] = useState('');
 
   useEffect(() => {
     loadUser();
@@ -72,6 +75,7 @@ export default function ProfileScreen() {
         const parsed = JSON.parse(userData);
         setUser(parsed);
         setBudgetValue(parsed.monthlyBudget?.toString() || '');
+        setUpiValue(parsed.upiId || '');
       }
     } catch (_error) {
       // Silent: User load failed - loading state remains
@@ -107,6 +111,17 @@ export default function ProfileScreen() {
     const budget = parseFloat(budgetValue) || 0;
     updateUserData({ monthlyBudget: budget });
     setShowBudgetInput(false);
+  };
+
+  const handleUpiSave = () => {
+    const upi = upiValue.trim();
+    // Basic UPI ID validation (format: username@bankname)
+    if (upi && !upi.includes('@')) {
+      showToast({ message: 'Invalid UPI ID format (e.g., name@upi)', type: 'error' });
+      return;
+    }
+    updateUserData({ upiId: upi } as any);
+    setShowUpiInput(false);
   };
 
   const handleLogout = () => {
@@ -301,6 +316,35 @@ export default function ProfileScreen() {
                 />
               }
             />
+            <View style={[styles.divider, { backgroundColor: theme.colors.border }]} />
+            <MenuItem
+              icon="account-balance"
+              title="UPI ID"
+              subtitle={user.upiId || 'Not set - Required for payment reminders'}
+              onPress={() => setShowUpiInput(!showUpiInput)}
+            />
+            {showUpiInput && (
+              <View style={[styles.inputRow, { borderTopColor: theme.colors.border }]}>
+                <View style={[styles.budgetInput, { backgroundColor: theme.colors.surfaceSecondary, flex: 1 }]}>
+                  <TextInput
+                    style={[styles.budgetTextInput, { color: theme.colors.text, flex: 1 }]}
+                    value={upiValue}
+                    onChangeText={setUpiValue}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    placeholder="yourname@upi"
+                    placeholderTextColor={theme.colors.textTertiary}
+                  />
+                </View>
+                <TouchableOpacity
+                  style={[styles.saveButton, { backgroundColor: theme.colors.primary }]}
+                  onPress={handleUpiSave}
+                  disabled={saving}
+                >
+                  <Text style={styles.saveButtonText}>{saving ? '...' : 'Save'}</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </Card>
         </View>
 

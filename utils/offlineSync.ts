@@ -581,3 +581,88 @@ export const clearOfflineData = async (): Promise<void> => {
     CACHED_RECURRING_KEY,
   ]);
 };
+
+// ============ RECENT PARTICIPANTS (Independent, User-Specific Storage) ============
+const RECENT_PARTICIPANTS_PREFIX = '@recent_participants_';
+
+export interface RecentParticipant {
+  name: string;
+  phone?: string;
+}
+
+// Helper to get user-specific key
+const getParticipantsKey = async (): Promise<string | null> => {
+  try {
+    const userData = await AsyncStorage.getItem('@user');
+    if (userData) {
+      const user = JSON.parse(userData);
+      return `${RECENT_PARTICIPANTS_PREFIX}${user._id || user.id}`;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+// Get recent participants from user-specific storage
+export const getRecentParticipants = async (): Promise<RecentParticipant[]> => {
+  try {
+    const key = await getParticipantsKey();
+    if (!key) return [];
+    
+    const data = await AsyncStorage.getItem(key);
+    return data ? JSON.parse(data) : [];
+  } catch {
+    return [];
+  }
+};
+
+// Save/update recent participants - merges new ones with existing (user-specific)
+export const saveRecentParticipants = async (participants: { name: string; phone?: string }[]): Promise<void> => {
+  try {
+    const key = await getParticipantsKey();
+    if (!key) return;
+    
+    const existing = await getRecentParticipants();
+    const participantsMap = new Map<string, RecentParticipant>();
+    
+    // Add existing participants first
+    existing.forEach(p => {
+      participantsMap.set(p.name.toLowerCase(), p);
+    });
+    
+    // Add/update with new participants
+    participants.forEach(p => {
+      const mapKey = p.name.toLowerCase();
+      const current = participantsMap.get(mapKey);
+      if (!current) {
+        participantsMap.set(mapKey, { name: p.name, phone: p.phone });
+      } else if (p.phone && !current.phone) {
+        // Update phone if we didn't have it before
+        participantsMap.set(mapKey, { name: p.name, phone: p.phone });
+      }
+    });
+    
+    await AsyncStorage.setItem(key, JSON.stringify(Array.from(participantsMap.values())));
+  } catch {
+    // Silent fail
+  }
+};
+
+// Update a participant's details (name/phone change) - user-specific
+export const updateRecentParticipant = async (oldName: string, newName: string, newPhone?: string): Promise<void> => {
+  try {
+    const key = await getParticipantsKey();
+    if (!key) return;
+    
+    const participants = await getRecentParticipants();
+    const updated = participants.map(p => 
+      p.name.toLowerCase() === oldName.toLowerCase() 
+        ? { name: newName, phone: newPhone } 
+        : p
+    );
+    await AsyncStorage.setItem(key, JSON.stringify(updated));
+  } catch {
+    // Silent fail
+  }
+};

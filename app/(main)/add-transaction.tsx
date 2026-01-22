@@ -18,8 +18,8 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../../utils/ThemeContext';
 import { useToast } from '../../components/Toast';
 import api from '../../utils/api';
-import { saveOfflineExpense, saveOfflineIncome, saveOfflineRecurring } from '../../utils/offlineSync';
-import SplitModal from '../../components/SplitModal';
+import { saveOfflineExpense, saveOfflineIncome, saveOfflineRecurring, getRecentParticipants, saveRecentParticipants } from '../../utils/offlineSync';
+import SplitModal, { RecentParticipant } from '../../components/SplitModal';
 
 const CATEGORIES = [
     { name: 'Food', icon: 'restaurant', color: '#F59E0B' },
@@ -100,6 +100,9 @@ export default function AddTransactionScreen() {
     const [isRecurring, setIsRecurring] = useState(false);
     const [recurringFrequency, setRecurringFrequency] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly');
 
+    // Recent participants for quick add
+    const [recentParticipants, setRecentParticipants] = useState<RecentParticipant[]>([]);
+
     useFocusEffect(
         useCallback(() => {
             setAmount('');
@@ -124,6 +127,7 @@ export default function AddTransactionScreen() {
 
     useEffect(() => {
         loadUserCurrency();
+        loadRecentParticipants();
     }, []);
 
     const loadUserCurrency = async () => {
@@ -134,6 +138,16 @@ export default function AddTransactionScreen() {
             }
         } catch (_error) {
             // Silent: Currency load failed - will use default ₹ symbol
+        }
+    };
+
+    // Load recent participants from independent storage (not affected by expense deletion)
+    const loadRecentParticipants = async () => {
+        try {
+            const participants = await getRecentParticipants();
+            setRecentParticipants(participants);
+        } catch (_error) {
+            // Silent: Failed to load recent participants
         }
     };
 
@@ -254,6 +268,10 @@ export default function AddTransactionScreen() {
                 try {
                     const response: any = await api.createExpense(token, expenseData);
                     if (response.success) {
+                        // Save participants to independent storage (survives expense deletion)
+                        if (isSplit && participants.length > 0) {
+                            await saveRecentParticipants(participants.map(p => ({ name: p.name, phone: p.phone })));
+                        }
                         // If recurring is enabled
                         if (isRecurring) {
                             try {
@@ -291,6 +309,10 @@ export default function AddTransactionScreen() {
                     console.error('Expense save error:', error);
                     if (error.message?.includes('Network')) {
                         await saveOfflineExpense({ ...expenseData, category: selectedCategory! });
+                        // Save participants even when offline
+                        if (isSplit && participants.length > 0) {
+                            await saveRecentParticipants(participants.map(p => ({ name: p.name, phone: p.phone })));
+                        }
                         showToast({ message: 'Saved offline', type: 'success' });
                         router.back();
                     } else {
@@ -664,6 +686,7 @@ export default function AddTransactionScreen() {
                     initialParticipants={participants}
                     initialSplitType={splitType}
                     initialUserHasPaid={userHasPaidShare}
+                    recentParticipants={recentParticipants}
                     onSave={handleSplitSave}
                 />
 

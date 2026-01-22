@@ -30,6 +30,11 @@ interface Participant {
     isPaid: boolean;
 }
 
+export interface RecentParticipant {
+    name: string;
+    phone?: string;
+}
+
 interface SplitModalProps {
     visible: boolean;
     onClose: () => void;
@@ -39,6 +44,7 @@ interface SplitModalProps {
     initialParticipants?: Participant[];
     initialSplitType?: 'equal' | 'custom' | 'percentage';
     initialUserHasPaid?: boolean;
+    recentParticipants?: RecentParticipant[];
     onSave: (participants: Participant[], splitType: 'equal' | 'custom' | 'percentage', userShare: number, payer: string, userHasPaid: boolean) => void;
 }
 
@@ -51,6 +57,7 @@ export default function SplitModal({
     initialParticipants = [],
     initialSplitType = 'equal',
     initialUserHasPaid = false,
+    recentParticipants = [],
     onSave 
 }: SplitModalProps) {
     const { theme } = useTheme();
@@ -67,8 +74,13 @@ export default function SplitModal({
     const [contactSearch, setContactSearch] = useState('');
     const [_loadingContacts, _setLoadingContacts] = useState(false);
     const [isInitialized, setIsInitialized] = useState(false); // Track if initial load is done
+    const [newPhone, setNewPhone] = useState('');
     const [_contactsError, _setContactsError] = useState<string | null>(null);
     const [_keyboardVisible, setKeyboardVisible] = useState(false);
+    const [showAddParticipantModal, setShowAddParticipantModal] = useState(false);
+    const [newAmount, setNewAmount] = useState('');
+    const [editingParticipant, setEditingParticipant] = useState<Participant | null>(null);
+    const [isEditMode, setIsEditMode] = useState(false);
     const inputRef = useRef<TextInput>(null);
 
     // Initialize or reset states when modal opens
@@ -129,6 +141,13 @@ export default function SplitModal({
             recalculateEqual();
         }
     }, [participants.length, includeMe, totalAmount, splitType]);
+
+    // Update share bar when totalAmount, newAmount, or participants change
+    useEffect(() => {
+        if (splitType === 'equal' && participants.length > 0) {
+            recalculateEqual();
+        }
+    }, [totalAmount, newAmount, splitType, includeMe, participants.length]);
 
     // Track previous payer to detect actual changes
     const prevPayerRef = useRef<string | null>(null);
@@ -297,12 +316,13 @@ export default function SplitModal({
             {
                 id: Date.now().toString(),
                 name: name.trim(),
-                phone,
+                phone: phone?.trim() || undefined,
                 shareAmount: share,
                 isPaid: false,
             }
         ]);
         setNewName('');
+        setNewPhone('');
     };
 
     // Contacts feature - commented out, requires development build
@@ -524,23 +544,23 @@ export default function SplitModal({
 
                         {/* Participants */}
                         <View style={styles.participantsHeader}>
-                            <Text style={[styles.label, { color: theme.colors.textSecondary }]}>Participants</Text>
-                            {/* Contacts button hidden - requires development build for native contacts access
-                            <TouchableOpacity
-                                onPress={loadContacts}
-                                style={styles.contactsBtn}
-                                disabled={loadingContacts}
-                            >
-                                {loadingContacts ? (
-                                    <Text style={[styles.contactsBtnText, { color: theme.colors.textSecondary }]}>Loading...</Text>
-                                ) : (
-                                    <>
-                                        <MaterialIcons name="contacts" size={18} color={theme.colors.primary} />
-                                        <Text style={[styles.contactsBtnText, { color: theme.colors.primary }]}>Contacts</Text>
-                                    </>
-                                )}
-                            </TouchableOpacity>
-                            */}
+                            <Text style={[styles.label, { color: theme.colors.textSecondary, marginTop: 0, marginBottom: 0 }]}>Participants ({participants.length})</Text>
+                            {/* Add Participant Button - only when I paid */}
+                            {payer === 'me' && (
+                                <TouchableOpacity
+                                    onPress={() => {
+                                        setIsEditMode(false);
+                                        setEditingParticipant(null);
+                                        setNewName('');
+                                        setNewPhone('');
+                                        setNewAmount('');
+                                        setShowAddParticipantModal(true);
+                                    }}
+                                    style={[styles.addParticipantBtn, { backgroundColor: theme.colors.primary }]}
+                                >
+                                    <MaterialIcons name="add" size={22} color="#FFF" />
+                                </TouchableOpacity>
+                            )}
                         </View>
 
                         {/* Contacts error hidden
@@ -596,23 +616,45 @@ export default function SplitModal({
                                         </View>
                                     )}
                                     <View style={styles.participantInfo}>
-                                        <View style={[styles.avatar, { backgroundColor: isThePayer ? '#10B981' + '30' : (p.isPaid ? '#10B981' + '20' : theme.colors.primary + '20') }]}>
+                                        <TouchableOpacity 
+                                            style={[styles.avatar, { backgroundColor: isThePayer ? '#10B981' + '30' : (p.isPaid ? '#10B981' + '20' : theme.colors.primary + '20') }]}
+                                            onPress={() => {
+                                                if (payer === 'me') {
+                                                    setIsEditMode(true);
+                                                    setEditingParticipant(p);
+                                                    setNewName(p.name);
+                                                    setNewPhone(p.phone || '');
+                                                    setNewAmount(p.shareAmount.toString());
+                                                    setShowAddParticipantModal(true);
+                                                }
+                                            }}
+                                        >
                                             <Text style={[styles.avatarText, { color: isThePayer ? '#10B981' : (p.isPaid ? '#10B981' : theme.colors.primary) }]}>
                                                 {p.name.charAt(0).toUpperCase()}
                                             </Text>
-                                        </View>
-                                        <View style={{ flex: 1 }}>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity 
+                                            style={{ flex: 1 }}
+                                            onPress={() => {
+                                                if (payer === 'me') {
+                                                    setIsEditMode(true);
+                                                    setEditingParticipant(p);
+                                                    setNewName(p.name);
+                                                    setNewPhone(p.phone || '');
+                                                    setNewAmount(p.shareAmount.toString());
+                                                    setShowAddParticipantModal(true);
+                                                }
+                                            }}
+                                        >
                                             <Text style={[styles.participantName, { color: theme.colors.text, textDecorationLine: (!isThePayer && p.isPaid) ? 'line-through' : 'none' }]}>
                                                 {p.name}
                                             </Text>
                                             {p.phone && (
-                                                <TouchableOpacity onPress={() => {/* Could open phone dialer */ }}>
-                                                    <Text style={[styles.participantPhone, { color: theme.colors.primary }]}>{p.phone}</Text>
-                                                </TouchableOpacity>
+                                                <Text style={[styles.participantPhone, { color: theme.colors.textSecondary }]}>{p.phone}</Text>
                                             )}
                                             {isThePayer && <Text style={[styles.paidLabel, { color: '#10B981' }]}>Paid the bill</Text>}
                                             {!isThePayer && p.isPaid && <Text style={[styles.paidLabel, { color: '#10B981' }]}>Settled</Text>}
-                                        </View>
+                                        </TouchableOpacity>
                                     </View>
                                     {/* Show share amount - editable in custom mode only when I paid */}
                                     {splitType === 'custom' && payer === 'me' ? (
@@ -635,12 +677,28 @@ export default function SplitModal({
                                             {isThePayer ? '+' : ''}{currencySymbol}{p.shareAmount.toLocaleString()}
                                         </Text>
                                     )}
-                                    {/* Only show remove button when I paid and for non-payers */}
-                                    {!isThePayer && payer === 'me' ? (
-                                        <TouchableOpacity onPress={() => removeParticipant(participantId)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                                            <MaterialIcons name="close" size={20} color={theme.colors.error} />
-                                        </TouchableOpacity>
-                                    ) : (
+                                    {/* Edit and Remove buttons when I paid */}
+                                    {!isThePayer && payer === 'me' && (
+                                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                                            <TouchableOpacity 
+                                                onPress={() => {
+                                                    setIsEditMode(true);
+                                                    setEditingParticipant(p);
+                                                    setNewName(p.name);
+                                                    setNewPhone(p.phone || '');
+                                                    setNewAmount(p.shareAmount.toString());
+                                                    setShowAddParticipantModal(true);
+                                                }} 
+                                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                            >
+                                                <MaterialIcons name="edit" size={18} color={theme.colors.textSecondary} />
+                                            </TouchableOpacity>
+                                            <TouchableOpacity onPress={() => removeParticipant(participantId)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                                                <MaterialIcons name="close" size={20} color={theme.colors.error} />
+                                            </TouchableOpacity>
+                                        </View>
+                                    )}
+                                    {(isThePayer || payer !== 'me') && (
                                         <View style={{ width: 20 }} />
                                     )}
                                 </View>
@@ -648,35 +706,8 @@ export default function SplitModal({
                         })}
                     </ScrollView>
 
-                    {/* Fixed Footer with Add Input and Save Button */}
+                    {/* Fixed Footer with Save Button */}
                     <View style={[styles.footer, { backgroundColor: theme.colors.background, borderTopColor: theme.colors.border }]}>
-                        {/* Add Participant - only when I paid */}
-                        {payer === 'me' && (
-                            <View style={[styles.addRow, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
-                                <TextInput
-                                    ref={inputRef}
-                                    style={[styles.addInput, { color: theme.colors.text }]}
-                                    value={newName}
-                                    onChangeText={setNewName}
-                                    placeholder="Add person's name"
-                                    placeholderTextColor={theme.colors.textTertiary}
-                                    returnKeyType="done"
-                                    onSubmitEditing={() => {
-                                        if (newName.trim()) {
-                                            addParticipant(newName);
-                                        }
-                                    }}
-                                />
-                                <TouchableOpacity
-                                    style={[styles.addBtn, { backgroundColor: newName.trim() ? theme.colors.primary : theme.colors.primary + '50' }]}
-                                    onPress={() => addParticipant(newName)}
-                                    disabled={!newName.trim()}
-                                >
-                                    <MaterialIcons name="add" size={20} color="#FFF" />
-                                </TouchableOpacity>
-                            </View>
-                        )}
-
                         {/* Save Button */}
                         <TouchableOpacity
                             style={[styles.saveBtn, { backgroundColor: theme.colors.primary }]}
@@ -692,6 +723,237 @@ export default function SplitModal({
                     </View>
 
                     {/* Contacts Modal - Hidden until development build is available */}
+
+                    {/* Add/Edit Participant Modal */}
+                    <Modal
+                        visible={showAddParticipantModal}
+                        transparent
+                        animationType="fade"
+                        onRequestClose={() => setShowAddParticipantModal(false)}
+                    >
+                        <TouchableOpacity
+                            style={styles.addModalOverlay}
+                            activeOpacity={1}
+                            onPress={() => setShowAddParticipantModal(false)}
+                        >
+                            <KeyboardAvoidingView
+                                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                                style={styles.addModalKeyboardView}
+                            >
+                                <TouchableOpacity activeOpacity={1} onPress={() => {}}>
+                                    <View style={[styles.addModalContent, { backgroundColor: theme.colors.background }]}>
+                                        <View style={styles.addModalHeader}>
+                                            <Text style={[styles.addModalTitle, { color: theme.colors.text }]}>
+                                                {isEditMode ? 'Edit Participant' : 'Add Participant'}
+                                            </Text>
+                                            <TouchableOpacity onPress={() => setShowAddParticipantModal(false)}>
+                                                <MaterialIcons name="close" size={24} color={theme.colors.text} />
+                                            </TouchableOpacity>
+                                        </View>
+
+                                        {/* Recent Participants - Quick Add (only in add mode) */}
+                                        {!isEditMode && recentParticipants.length > 0 && recentParticipants.filter(rp => !participants.some(p => p.name.toLowerCase() === rp.name.toLowerCase())).length > 0 && (
+                                            <View style={styles.recentSection}>
+                                                <Text style={[styles.addModalLabel, { color: theme.colors.textSecondary, marginTop: 0 }]}>Quick Add</Text>
+                                                <ScrollView 
+                                                    horizontal 
+                                                    showsHorizontalScrollIndicator={false} 
+                                                    style={styles.recentParticipantsScroll}
+                                                    contentContainerStyle={styles.recentParticipantsContainer}
+                                                >
+                                                    {recentParticipants
+                                                        .filter(rp => !participants.some(p => p.name.toLowerCase() === rp.name.toLowerCase()))
+                                                        .slice(0, 10)
+                                                        .map((rp, idx) => (
+                                                            <TouchableOpacity
+                                                                key={`recent-${idx}-${rp.name}`}
+                                                                style={[styles.recentChip, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+                                                                onPress={() => {
+                                                                    const count = participants.length + (includeMe ? 1 : 0) + 1;
+                                                                    const share = splitType === 'equal' ? Math.round((totalAmount / count) * 100) / 100 : 0;
+                                                                    setParticipants(prev => [
+                                                                        ...prev,
+                                                                        {
+                                                                            id: Date.now().toString(),
+                                                                            name: rp.name,
+                                                                            phone: rp.phone,
+                                                                            shareAmount: share,
+                                                                            isPaid: false,
+                                                                        }
+                                                                    ]);
+                                                                    setShowAddParticipantModal(false);
+                                                                }}
+                                                            >
+                                                                <Text style={[styles.recentChipText, { color: theme.colors.text }]}>{rp.name}</Text>
+                                                                {rp.phone && <MaterialIcons name="phone" size={12} color={theme.colors.textSecondary} />}
+                                                            </TouchableOpacity>
+                                                        ))
+                                                    }
+                                                </ScrollView>
+                                            </View>
+                                        )}
+
+                                        {/* Form Fields */}
+                                        <View style={styles.formFields}>
+                                            {/* Name */}
+                                            <View style={styles.inputGroup}>
+                                                <Text style={[styles.inputLabel, { color: theme.colors.textSecondary }]}>Name</Text>
+                                                <TextInput
+                                                    ref={inputRef}
+                                                    style={[styles.addModalInput, { color: theme.colors.text, backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+                                                    value={newName}
+                                                    onChangeText={setNewName}
+                                                    placeholder="Enter name"
+                                                    placeholderTextColor={theme.colors.textTertiary}
+                                                    autoFocus={!isEditMode && recentParticipants.length === 0}
+                                                />
+                                            </View>
+
+                                            {/* Phone */}
+                                            <View style={styles.inputGroup}>
+                                                <Text style={[styles.inputLabel, { color: theme.colors.textSecondary }]}>Phone</Text>
+                                                <TextInput
+                                                    style={[styles.addModalInput, { color: theme.colors.text, backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}
+                                                    value={newPhone}
+                                                    onChangeText={setNewPhone}
+                                                    placeholder="For reminders (optional)"
+                                                    placeholderTextColor={theme.colors.textTertiary}
+                                                    keyboardType="phone-pad"
+                                                />
+                                            </View>
+
+                                            {/* Amount (only for custom/percentage split or edit mode) */}
+                                            {(splitType !== 'equal' || isEditMode) && (
+                                                <View style={styles.inputGroup}>
+                                                    <Text style={[styles.inputLabel, { color: theme.colors.textSecondary }]}> 
+                                                        Share Amount
+                                                    </Text>
+                                                    <View style={[styles.amountInputRow, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}> 
+                                                        <Text style={[styles.currencyPrefix, { color: theme.colors.textSecondary }]}>{currencySymbol}</Text>
+                                                        <TextInput
+                                                            style={[styles.amountInput, { color: theme.colors.text }]}
+                                                            value={newAmount}
+                                                            onChangeText={setNewAmount}
+                                                            placeholder={'0'}
+                                                            placeholderTextColor={theme.colors.textTertiary}
+                                                            keyboardType="decimal-pad"
+                                                            editable={true}
+                                                        />
+                                                    </View>
+                                                </View>
+                                            )}
+                                        </View>
+
+                                        {/* Action Buttons */}
+                                        <View style={styles.modalActions}>
+                                            {isEditMode && (
+                                                <TouchableOpacity
+                                                    style={[styles.deleteBtn, { backgroundColor: '#EF4444' + '15' }]}
+                                                    onPress={() => {
+                                                        if (editingParticipant) {
+                                                            const pId = editingParticipant.id || editingParticipant._id;
+                                                            setParticipants(prev => prev.filter(p => (p.id || p._id) !== pId));
+                                                            setShowAddParticipantModal(false);
+                                                            setEditingParticipant(null);
+                                                            setIsEditMode(false);
+                                                        }
+                                                    }}
+                                                >
+                                                    <MaterialIcons name="delete" size={20} color="#EF4444" />
+                                                </TouchableOpacity>
+                                            )}
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.saveParticipantBtn, 
+                                                    { backgroundColor: newName.trim() ? theme.colors.primary : theme.colors.primary + '50' },
+                                                    isEditMode && { flex: 1 }
+                                                ]}
+                                                onPress={() => {
+                                                    if (newName.trim()) {
+                                                        if (isEditMode && editingParticipant) {
+                                                            // Update existing participant
+                                                            const pId = editingParticipant.id || editingParticipant._id;
+                                                            setParticipants(prev => prev.map(p => {
+                                                                if ((p.id || p._id) === pId) {
+                                                                    return {
+                                                                        ...p,
+                                                                        name: newName.trim(),
+                                                                        phone: newPhone.trim() || undefined,
+                                                                        shareAmount: parseFloat(newAmount) || p.shareAmount,
+                                                                    };
+                                                                }
+                                                                return p;
+                                                            }));
+                                                        } else {
+                                                            // Add new participant with custom share if provided
+                                                            let share = 0;
+                                                            let customShare = parseFloat(newAmount);
+                                                            const count = participants.length + (includeMe ? 1 : 0) + 1;
+                                                            if (splitType === 'equal') {
+                                                                if (!isNaN(customShare) && customShare > 0) {
+                                                                    // Custom share for this participant, recalc others
+                                                                    const othersCount = count - 1;
+                                                                    const remaining = totalAmount - customShare;
+                                                                    const otherShare = othersCount > 0 ? Math.round((remaining / othersCount) * 100) / 100 : 0;
+                                                                    setParticipants(prev => [
+                                                                        ...prev.map(p => ({ ...p, shareAmount: otherShare })),
+                                                                        {
+                                                                            id: Date.now().toString(),
+                                                                            name: newName.trim(),
+                                                                            phone: newPhone.trim() || undefined,
+                                                                            shareAmount: customShare,
+                                                                            isPaid: false,
+                                                                        }
+                                                                    ]);
+                                                                } else {
+                                                                    // No custom share, use equal
+                                                                    share = Math.round((totalAmount / count) * 100) / 100;
+                                                                    setParticipants(prev => [
+                                                                        ...prev.map(p => ({ ...p, shareAmount: share })),
+                                                                        {
+                                                                            id: Date.now().toString(),
+                                                                            name: newName.trim(),
+                                                                            phone: newPhone.trim() || undefined,
+                                                                            shareAmount: share,
+                                                                            isPaid: false,
+                                                                        }
+                                                                    ]);
+                                                                }
+                                                            } else {
+                                                                // Custom split
+                                                                share = customShare || 0;
+                                                                setParticipants(prev => [
+                                                                    ...prev,
+                                                                    {
+                                                                        id: Date.now().toString(),
+                                                                        name: newName.trim(),
+                                                                        phone: newPhone.trim() || undefined,
+                                                                        shareAmount: share,
+                                                                        isPaid: false,
+                                                                    }
+                                                                ]);
+                                                            }
+                                                        }
+                                                        setNewName('');
+                                                        setNewPhone('');
+                                                        setNewAmount('');
+                                                        setShowAddParticipantModal(false);
+                                                        setEditingParticipant(null);
+                                                        setIsEditMode(false);
+                                                    }
+                                                }}
+                                                disabled={!newName.trim()}
+                                            >
+                                                <Text style={styles.saveParticipantBtnText}>
+                                                    {isEditMode ? 'Save Changes' : 'Add'}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+                                </TouchableOpacity>
+                            </KeyboardAvoidingView>
+                        </TouchableOpacity>
+                    </Modal>
                 </View>
                 </TouchableOpacity>
             </KeyboardAvoidingView>
@@ -716,7 +978,9 @@ const styles = StyleSheet.create({
     includeMe: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 20, marginTop: 16, padding: 14, borderRadius: 12, gap: 10 },
     includeMeText: { flex: 1, fontSize: 15 },
     myShare: { fontSize: 16, fontWeight: '600' },
-    participantsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginTop: 20 },
+    participantsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginTop: 20, marginBottom: 4 },
+    addParticipantBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, gap: 4 },
+    addParticipantBtnText: { color: '#FFF', fontSize: 13, fontWeight: '600' },
     contactsBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: 8 },
     contactsBtnText: { fontSize: 13, fontWeight: '500' },
     errorText: { fontSize: 12, marginHorizontal: 20, marginTop: 8 },
@@ -734,7 +998,8 @@ const styles = StyleSheet.create({
     shareAmount: { fontSize: 16, fontWeight: '600', marginRight: 10, minWidth: 70, textAlign: 'right' },
     // Fixed footer styles
     footer: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 34, borderTopWidth: 1 },
-    addRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 12, padding: 4, marginBottom: 12 },
+    addParticipantSection: { marginBottom: 12 },
+    addRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 12, padding: 4 },
     addInput: { flex: 1, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
     addBtn: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
     saveBtn: { paddingVertical: 16, borderRadius: 14, alignItems: 'center' },
@@ -760,4 +1025,31 @@ const styles = StyleSheet.create({
     userShareSection: { marginHorizontal: 20, marginTop: 12, padding: 14 },
     myShareRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     userPaidToggleInner: { flexDirection: 'row', alignItems: 'center', padding: 8, borderRadius: 8, gap: 12 },
+    // Add Participant Modal styles
+    addModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 },
+    addModalKeyboardView: { width: '100%', maxWidth: 400 },
+    addModalContent: { width: '100%', borderRadius: 20, padding: 20 },
+    addModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+    addModalTitle: { fontSize: 18, fontWeight: '600' },
+    addModalLabel: { fontSize: 13, fontWeight: '500', marginBottom: 6, marginTop: 12 },
+    addModalInput: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15 },
+    addModalBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 12, marginTop: 20, gap: 8 },
+    addModalBtnText: { color: '#FFF', fontSize: 15, fontWeight: '600' },
+    // Recent participants styles
+    recentParticipantsScroll: { marginBottom: 16 },
+    recentParticipantsContainer: { gap: 8 },
+    recentChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1, gap: 6 },
+    recentChipText: { fontSize: 14, fontWeight: '500' },
+    // Add/Edit participant modal form styles
+    recentSection: { marginBottom: 8 },
+    formFields: { gap: 4 },
+    inputGroup: { marginBottom: 12 },
+    inputLabel: { fontSize: 13, fontWeight: '500', marginBottom: 6 },
+    amountInputRow: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 12, paddingHorizontal: 14 },
+    currencyPrefix: { fontSize: 16, fontWeight: '600', marginRight: 8 },
+    amountInput: { flex: 1, paddingVertical: 12, fontSize: 15 },
+    modalActions: { flexDirection: 'row', gap: 12, marginTop: 20 },
+    deleteBtn: { width: 48, height: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+    saveParticipantBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+    saveParticipantBtnText: { color: '#FFF', fontSize: 15, fontWeight: '600' },
 });

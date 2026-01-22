@@ -20,8 +20,8 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../../utils/ThemeContext';
 import { useToast } from '../../components/Toast';
 import api from '../../utils/api';
-import { savePendingDelete, savePendingUpdate, getCachedExpenses, cacheExpenses, getMergedExpenses } from '../../utils/offlineSync';
-import SplitModal from '../../components/SplitModal';
+import { savePendingDelete, savePendingUpdate, getCachedExpenses, cacheExpenses, getMergedExpenses, getRecentParticipants, saveRecentParticipants } from '../../utils/offlineSync';
+import SplitModal, { RecentParticipant } from '../../components/SplitModal';
 
 const CATEGORIES = [
     { name: 'Food', icon: 'restaurant', color: '#F59E0B' },
@@ -81,6 +81,9 @@ export default function EditExpenseScreen() {
     const [payer, setPayer] = useState('me');
     const [userHasPaidShare, setUserHasPaidShare] = useState(true); // Track if user has paid their share
 
+    // Recent participants for quick add
+    const [recentParticipants, setRecentParticipants] = useState<RecentParticipant[]>([]);
+
     // Open calculator with current amount pre-populated
     const openCalculator = () => {
         if (amount && parseFloat(amount) > 0) {
@@ -133,6 +136,10 @@ export default function EditExpenseScreen() {
                 expenses = mergedExpenses;
                 console.log('[edit-expense] Using merged cached expenses');
             }
+
+            // Load recent participants from independent storage (survives expense deletion)
+            const storedParticipants = await getRecentParticipants();
+            setRecentParticipants(storedParticipants);
 
             // Find expense by _id (server) or by offline_id format
             const expense = expenses.find((e: any) =>
@@ -261,6 +268,11 @@ export default function EditExpenseScreen() {
                     );
                     await cacheExpenses(updated);
 
+                    // Save participants to independent storage (survives expense deletion)
+                    if (isSplit && participants.length > 0) {
+                        await saveRecentParticipants(participants.map(p => ({ name: p.name, phone: p.phone })));
+                    }
+
                     showToast({ message: 'Expense updated', type: 'success' });
                     router.back();
                 } else {
@@ -277,6 +289,11 @@ export default function EditExpenseScreen() {
                         e._id === expenseId ? { ...e, ...updateData } : e
                     );
                     await cacheExpenses(updated);
+
+                    // Save participants even when offline
+                    if (isSplit && participants.length > 0) {
+                        await saveRecentParticipants(participants.map(p => ({ name: p.name, phone: p.phone })));
+                    }
 
                     showToast({ message: 'Updated offline. Will sync when online.', type: 'info' });
                     router.back();
@@ -680,6 +697,7 @@ export default function EditExpenseScreen() {
                     initialParticipants={participants}
                     initialSplitType={splitType}
                     initialUserHasPaid={userHasPaidShare}
+                    recentParticipants={recentParticipants}
                     onSave={handleSplitSave}
                 />
 

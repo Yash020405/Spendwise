@@ -72,6 +72,7 @@ router.post("/signup", async (req, res) => {
           currency: user.currency,
           currencySymbol: CURRENCIES[user.currency]?.symbol || '$',
           monthlyBudget: user.monthlyBudget,
+          upiId: user.upiId || '',
         },
       },
     });
@@ -135,6 +136,7 @@ router.post("/login", async (req, res) => {
           currency: user.currency,
           currencySymbol: CURRENCIES[user.currency]?.symbol || '$',
           monthlyBudget: user.monthlyBudget,
+          upiId: user.upiId || '',
         },
       },
     });
@@ -160,6 +162,7 @@ router.get("/me", protect, async (req, res) => {
           currency: req.user.currency,
           currencySymbol: CURRENCIES[req.user.currency]?.symbol || '$',
           monthlyBudget: req.user.monthlyBudget,
+          upiId: req.user.upiId || '',
         },
       },
     });
@@ -175,7 +178,7 @@ router.get("/me", protect, async (req, res) => {
 // Update user profile
 router.put("/me", protect, async (req, res) => {
   try {
-    const { name, currency, monthlyBudget } = req.body;
+    const { name, currency, monthlyBudget, upiId } = req.body;
 
     // Build update object with explicit sanitization
     const updateFields = {};
@@ -189,6 +192,10 @@ router.put("/me", protect, async (req, res) => {
     }
     if (monthlyBudget !== undefined && typeof monthlyBudget === 'number') {
       updateFields.monthlyBudget = Number(monthlyBudget);
+    }
+    if (upiId !== undefined && typeof upiId === 'string') {
+      // Sanitize UPI ID - allow alphanumeric, @, and .
+      updateFields.upiId = sanitizeString(String(upiId).trim().slice(0, 50));
     }
 
     // Use $set operator explicitly to prevent injection
@@ -208,6 +215,7 @@ router.put("/me", protect, async (req, res) => {
           currency: user.currency,
           currencySymbol: CURRENCIES[user.currency]?.symbol || '$',
           monthlyBudget: user.monthlyBudget,
+          upiId: user.upiId || '',
         },
       },
     });
