@@ -17,6 +17,7 @@ import { useTheme } from '../../utils/ThemeContext';
 import { useToast } from '../../components/Toast';
 import { Card } from '../../components/ui';
 import api from '../../utils/api';
+import ExportModal from '../../components/ExportModal';
 
 const CURRENCIES = [
   { code: 'USD', symbol: '$', name: 'US Dollar' },
@@ -50,6 +51,7 @@ export default function ProfileScreen() {
   const [carryOverBudget, setCarryOverBudget] = useState(false);
   const [showUpiInput, setShowUpiInput] = useState(false);
   const [upiValue, setUpiValue] = useState('');
+  const [showExportModal, setShowExportModal] = useState(false);
 
   useEffect(() => {
     loadUser();
@@ -374,6 +376,13 @@ export default function ProfileScreen() {
               subtitle="Customize expense categories"
               onPress={() => router.push('/(main)/categories' as any)}
             />
+            <View style={[styles.divider, { backgroundColor: theme.colors.border }]} />
+            <MenuItem
+              icon="file-download"
+              title="Export Data"
+              subtitle="Download expenses as CSV or PDF"
+              onPress={() => setShowExportModal(true)}
+            />
           </Card>
         </View>
 
@@ -440,7 +449,7 @@ export default function ProfileScreen() {
         {/* App Info */}
         <View style={styles.appInfo}>
           <Text style={[styles.appName, { color: theme.colors.textSecondary }]}>
-            Spendwise v1.0.0
+            Spendwise v1.1.0
           </Text>
           <Text style={[styles.appTagline, { color: theme.colors.textTertiary }]}>
             Made by Yash Agarwal
@@ -449,6 +458,13 @@ export default function ProfileScreen() {
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* Export Modal */}
+      <ExportModal
+        visible={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        currencySymbol={currentCurrency.symbol}
+      />
     </SafeAreaView>
   );
 }

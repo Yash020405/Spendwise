@@ -1,7 +1,7 @@
 {
   "name": "spendwise",
   "main": "expo-router/entry",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
@@ -19,7 +19,7 @@
     "@react-native-community/netinfo": "^11.4.1",
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/native": "^7.1.8",
-    "expo": "~54.0.31",
+    "expo": "~54.0.32",
     "expo-constants": "~18.0.13",
     "expo-contacts": "~15.0.11",
     "expo-linking": "~8.0.11",

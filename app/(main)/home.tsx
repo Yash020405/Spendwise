@@ -16,7 +16,7 @@ import { useToast } from '../../components/Toast';
 import { Card } from '../../components/ui';
 import api from '../../utils/api';
 import AppWalkthrough from '../../components/AppWalkthrough';
-import { syncPendingExpenses, getPendingCount, cacheExpenses, getMergedExpenses } from '../../utils/offlineSync';
+import { syncPendingExpenses, getPendingCount, cacheExpenses, getMergedExpenses, cacheIncome, getMergedIncome } from '../../utils/offlineSync';
 import { LoadingView } from '../../components/LoadingView';
 
 // Category colors and icons
@@ -114,13 +114,20 @@ export default function HomeScreen() {
         const incomeData = incomeRes.data || incomeRes.income;
         if (incomeRes.success && Array.isArray(incomeData)) {
           fetchedIncome = incomeData;
+          // Cache income data for offline use
+          await cacheIncome(incomeData);
         }
       } catch (err: any) {
         // Show toast for rate limiting errors
         if (err?.message?.includes('Too many requests') || err?.code === 5001) {
           showToast({ message: 'Rate limited. Please wait a moment.', type: 'warning' });
         }
-        // Income fetch failed - will show expenses only
+        // Income fetch failed - use cached/merged income for offline support
+        try {
+          fetchedIncome = await getMergedIncome();
+        } catch (_mergeErr) {
+          // Silent: Income merge failed
+        }
       }
 
       // Always use merged data (cached server + offline pending)
@@ -182,7 +189,38 @@ export default function HomeScreen() {
           }
         }
       } catch (_balanceErr) {
-        // Silent: Balance fetch failed - non-critical, UI will handle null balance
+        // Balance fetch failed - calculate locally from cached data for offline support
+        try {
+          const cachedExpenses = await getMergedExpenses();
+          const cachedIncome = await getMergedIncome();
+
+          const now = new Date();
+          const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+          // Calculate monthly totals from cached data
+          const monthlyExpenses = cachedExpenses
+            .filter((e: any) => new Date(e.date) >= monthStart)
+            .reduce((sum: number, e: any) => {
+              const effectiveAmount = e.isSplit ? (e.userShare || 0) : e.amount;
+              return sum + effectiveAmount;
+            }, 0);
+
+          const monthlyIncome = cachedIncome
+            .filter((i: any) => new Date(i.date) >= monthStart)
+            .reduce((sum: number, i: any) => sum + i.amount, 0);
+
+          const netBalance = monthlyIncome - monthlyExpenses;
+          const savingsRate = monthlyIncome > 0 ? Math.round((netBalance / monthlyIncome) * 100) : 0;
+
+          setBalance({
+            totalIncome: monthlyIncome,
+            totalExpenses: monthlyExpenses,
+            netBalance,
+            savingsRate
+          });
+        } catch (_localCalcErr) {
+          // Silent: Local calculation failed - UI will handle null balance
+        }
       }
 
     } catch (_error) {
@@ -517,7 +555,7 @@ export default function HomeScreen() {
                   <View key={item._id}>
                     <TouchableOpacity
                       style={styles.activityItem}
-                      onPress={() => isIncome 
+                      onPress={() => isIncome
                         ? router.push({ pathname: '/(main)/edit-income', params: { id: item._id } })
                         : router.push({ pathname: '/(main)/edit-expense', params: { id: item._id } })
                       }
