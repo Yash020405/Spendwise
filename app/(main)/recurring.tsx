@@ -9,9 +9,10 @@ import {
     Modal,
     TextInput,
     Alert,
+    Platform,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -19,7 +20,16 @@ import { useTheme } from '../../utils/ThemeContext';
 import { useToast } from '../../components/Toast';
 import { Card } from '../../components/ui';
 import api from '../../utils/api';
-import { saveOfflineRecurring, getMergedRecurring, cacheRecurring } from '../../utils/offlineSync';
+import {
+    saveOfflineRecurring,
+    getMergedRecurring,
+    cacheRecurring,
+    shouldSaveOffline,
+    updatePendingRecurring,
+    deletePendingRecurring
+} from '../../utils/offlineSync';
+import { syncPendingRecurring } from '../../utils/offlineSync';
+import { savePendingRecurringUpdate, savePendingRecurringDelete } from '../../utils/offlineSync';
 
 const FREQUENCIES = [
     { value: 'daily', label: 'Daily', icon: 'today' },
@@ -58,12 +68,17 @@ interface RecurringItem {
     frequency: string;
     nextDueDate: string;
     isActive: boolean;
+    isOffline?: boolean;
+    startDate?: string;
+    endDate?: string;
+    dayOfMonth?: number;
 }
 
 export default function RecurringScreen() {
     const { theme } = useTheme();
     const router = useRouter();
     const { showToast } = useToast();
+    const insets = useSafeAreaInsets();
 
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -81,6 +96,9 @@ export default function RecurringScreen() {
     const [formDayOfMonth, setFormDayOfMonth] = useState('1');
     const [formStartDate, setFormStartDate] = useState(new Date());
     const [showStartPicker, setShowStartPicker] = useState(false);
+
+    // Edit state
+    const [editingItem, setEditingItem] = useState<RecurringItem | null>(null);
 
     useFocusEffect(
         useCallback(() => {
@@ -106,11 +124,15 @@ export default function RecurringScreen() {
             try {
                 const response: any = await api.getRecurring(token);
                 if (response.success) {
-                    // Cache the server data
-                    await cacheRecurring(response.data);
-                    // Display merged (server + offline)
-                    const merged = await getMergedRecurring();
-                    setRecurring(merged);
+                        // Cache the server data
+                        await cacheRecurring(response.data);
+                        // Try syncing any pending recurring items now that we have connectivity
+                        try {
+                            await syncPendingRecurring(token);
+                        } catch (_) { /* ignore sync errors here */ }
+                        // Display merged (server + offline)
+                        const merged = await getMergedRecurring();
+                        setRecurring(merged);
                 }
             } catch (_error: any) {
                 // Network error - use cached/merged data
@@ -126,9 +148,28 @@ export default function RecurringScreen() {
     };
 
     const handleToggle = async (item: RecurringItem) => {
+        // Optimistic Update
+        const previousState = [...recurring];
+        setRecurring(prev => prev.map(i =>
+            i._id === item._id ? { ...i, isActive: !i.isActive } : i
+        ));
+
         try {
+            if (item.isOffline) {
+                // Handle offline item toggle
+                await updatePendingRecurring(item._id, {
+                    // @ts-ignore
+                    isActive: !item.isActive
+                });
+                showToast({
+                    message: !item.isActive ? 'Paused (Offline)' : 'Resumed (Offline)',
+                    type: 'success'
+                });
+                return;
+            }
+
             const token = await AsyncStorage.getItem('@auth_token');
-            if (!token) return;
+            if (!token) throw new Error('No token');
 
             const response: any = await api.toggleRecurring(token, item._id);
             if (response.success) {
@@ -136,17 +177,58 @@ export default function RecurringScreen() {
                     message: response.message || (item.isActive ? 'Paused' : 'Resumed'),
                     type: 'success'
                 });
-                fetchRecurring();
+                fetchRecurring(); // Refresh to confirm
+            } else {
+                throw new Error(response.message);
             }
         } catch (_error) {
+            // Try to save toggle as pending update if offline-eligible
+            try {
+                // @ts-ignore
+                if (shouldSaveOffline(_error)) {
+                    await savePendingRecurringUpdate(item._id, { isActive: !item.isActive });
+                    showToast({ message: !item.isActive ? 'Paused (Offline)' : 'Resumed (Offline)', type: 'success' });
+                    return;
+                }
+            } catch {
+                // ignore
+            }
+            // Revert on failure
+            setRecurring(previousState);
             showToast({ message: 'Failed to toggle', type: 'error' });
         }
     };
 
     const handleGenerate = async (item: RecurringItem) => {
+        showToast({ message: 'Generating...', type: 'info' });
         try {
             const token = await AsyncStorage.getItem('@auth_token');
-            if (!token) return;
+            if (!token) throw new Error('No token');
+
+            // If item is offline, attempt to sync pending recurring first (helps when device is online)
+            if (item.isOffline) {
+                try {
+                    await syncPendingRecurring(token);
+                    // Refresh merged list and try to find a server counterpart
+                    await cacheRecurring(await api.getRecurring(token).then((r: any) => r.success ? r.data : []));
+                    const merged = await getMergedRecurring();
+                    // Try to find a non-offline recurring that matches by amount/frequency/description
+                    const resolved = merged.find(r => !r.isOffline && r.amount === item.amount && r.frequency === item.frequency && (r.description || '') === (item.description || ''));
+                    if (resolved) {
+                        const response: any = await api.generateRecurring(token, resolved._id);
+                        if (response.success) {
+                            showToast({ message: `${resolved.type} generated!`, type: 'success' });
+                            fetchRecurring();
+                            return;
+                        }
+                    }
+                } catch (_e) {
+                    // fallthrough to warning below
+                }
+
+                showToast({ message: 'Cannot generate from offline item yet', type: 'warning' });
+                return;
+            }
 
             const response: any = await api.generateRecurring(token, item._id);
             if (response.success) {
@@ -168,16 +250,40 @@ export default function RecurringScreen() {
                     text: 'Delete',
                     style: 'destructive',
                     onPress: async () => {
+                        // Optimistic Update
+                        const previousState = [...recurring];
+                        setRecurring(prev => prev.filter(i => i._id !== item._id));
+
                         try {
+                            if (item.isOffline) {
+                                await deletePendingRecurring(item._id);
+                                showToast({ message: 'Deleted (Offline)', type: 'success' });
+                                return;
+                            }
+
                             const token = await AsyncStorage.getItem('@auth_token');
-                            if (!token) return;
+                            if (!token) throw new Error('No token');
 
                             const response: any = await api.deleteRecurring(token, item._id);
                             if (response.success) {
                                 showToast({ message: 'Deleted', type: 'success' });
                                 fetchRecurring();
+                            } else {
+                                throw new Error(response.message);
                             }
-                        } catch (_error) {
+                        } catch (e: any) {
+                            // If offline-eligible, save a pending delete so it will be retried
+                            try {
+                                if (shouldSaveOffline(e)) {
+                                    await savePendingRecurringDelete(item._id);
+                                    showToast({ message: 'Deleted (Offline)', type: 'success' });
+                                    return;
+                                }
+                            } catch {
+                                // ignore
+                            }
+                            // Revert
+                            setRecurring(previousState);
                             showToast({ message: 'Failed to delete', type: 'error' });
                         }
                     },
@@ -215,32 +321,82 @@ export default function RecurringScreen() {
                 startDate: formStartDate.toISOString(),
             };
 
-            try {
-                const response: any = await api.createRecurring(token, recurringData);
-                if (response.success) {
-                    showToast({ message: 'Recurring added!', type: 'success' });
+            if (editingItem) {
+                // UPDATE EXISTING
+                if (editingItem.isOffline) {
+                    await updatePendingRecurring(editingItem._id, recurringData);
+                    showToast({ message: 'Updated (Offline)', type: 'success' });
                     setShowAddModal(false);
                     resetForm();
                     fetchRecurring();
+                    return;
                 }
-            } catch (error: any) {
-                // Network error - save offline
-                if (error.message?.includes('Network')) {
-                    await saveOfflineRecurring(recurringData);
-                    showToast({ message: 'Recurring saved offline', type: 'success' });
-                    setShowAddModal(false);
-                    resetForm();
-                    fetchRecurring();
-                } else {
-                    showToast({ message: 'Failed to create recurring', type: 'error' });
+
+                try {
+                    const response: any = await api.updateRecurring(token, editingItem._id, recurringData);
+                    if (response.success) {
+                        showToast({ message: 'Recurring updated!', type: 'success' });
+                        setShowAddModal(false);
+                        resetForm();
+                        fetchRecurring();
+                    } else {
+                        throw new Error(response.message || 'Failed to update');
+                    }
+                } catch (e: any) {
+                    if (shouldSaveOffline(e)) {
+                        await savePendingRecurringUpdate(editingItem._id, recurringData);
+                        showToast({ message: 'Updated (Offline)', type: 'success' });
+                        setShowAddModal(false);
+                        resetForm();
+                        fetchRecurring();
+                        return;
+                    }
+                    showToast({ message: e.message || 'Failed to update', type: 'error' });
+                }
+            } else {
+                // CREATE NEW
+                try {
+                    const response: any = await api.createRecurring(token, recurringData);
+                    if (response.success) {
+                        showToast({ message: 'Recurring added!', type: 'success' });
+                        setShowAddModal(false);
+                        resetForm();
+                        fetchRecurring();
+                    }
+                } catch (error: any) {
+                    // Network error - save offline
+                    if (shouldSaveOffline(error)) {
+                        await saveOfflineRecurring(recurringData);
+                        showToast({ message: 'Recurring saved offline', type: 'success' });
+                        setShowAddModal(false);
+                        resetForm();
+                        fetchRecurring();
+                    } else {
+                        showToast({ message: 'Failed to create recurring', type: 'error' });
+                    }
                 }
             }
         } catch (_error) {
-            showToast({ message: 'Failed to create', type: 'error' });
+            showToast({ message: 'Operation failed', type: 'error' });
         }
     };
 
+    const handleEdit = (item: RecurringItem) => {
+        setEditingItem(item);
+        setFormType(item.type);
+        setFormAmount(item.amount.toString());
+        if (item.type === 'expense') setFormCategory(item.category || '');
+        if (item.type === 'income') setFormSource(item.source || '');
+        setFormDescription(item.description || '');
+        setFormFrequency(item.frequency);
+        if (item.dayOfMonth) setFormDayOfMonth(item.dayOfMonth.toString());
+        if (item.startDate) setFormStartDate(new Date(item.startDate));
+
+        setShowAddModal(true);
+    };
+
     const resetForm = () => {
+        setEditingItem(null);
         setFormType('expense');
         setFormAmount('');
         setFormCategory('');
@@ -318,27 +474,29 @@ export default function RecurringScreen() {
                         const config = getItemConfig(item);
                         return (
                             <Card key={item._id} style={[styles.itemCard, !item.isActive && { opacity: 0.6 }] as any}>
-                                <View style={styles.itemRow}>
-                                    <View style={[styles.iconBox, { backgroundColor: config.color + '20' }]}>
-                                        <MaterialIcons name={config.icon as any} size={22} color={config.color} />
-                                    </View>
-                                    <View style={styles.itemInfo}>
-                                        <Text style={[styles.itemName, { color: theme.colors.text }]}>
-                                            {item.description || item.category || item.source}
-                                        </Text>
-                                        <View style={styles.itemMeta}>
-                                            <Text style={[styles.itemFreq, { color: theme.colors.textSecondary }]}>
-                                                {FREQUENCIES.find(f => f.value === item.frequency)?.label} • {formatNextDue(item.nextDueDate)}
-                                            </Text>
+                                <TouchableOpacity onPress={() => handleEdit(item)} activeOpacity={0.7}>
+                                    <View style={styles.itemRow}>
+                                        <View style={[styles.iconBox, { backgroundColor: config.color + '20' }]}>
+                                            <MaterialIcons name={config.icon as any} size={22} color={config.color} />
                                         </View>
+                                        <View style={styles.itemInfo}>
+                                            <Text style={[styles.itemName, { color: theme.colors.text }]}>
+                                                {item.description || item.category || item.source}
+                                            </Text>
+                                            <View style={styles.itemMeta}>
+                                                <Text style={[styles.itemFreq, { color: theme.colors.textSecondary }]}>
+                                                    {FREQUENCIES.find(f => f.value === item.frequency)?.label} • {formatNextDue(item.nextDueDate)}
+                                                </Text>
+                                            </View>
+                                        </View>
+                                        <Text style={[
+                                            styles.itemAmount,
+                                            { color: item.type === 'income' ? '#10B981' : theme.colors.text }
+                                        ]}>
+                                            {item.type === 'income' ? '+' : '-'}{currencySymbol}{item.amount.toLocaleString()}
+                                        </Text>
                                     </View>
-                                    <Text style={[
-                                        styles.itemAmount,
-                                        { color: item.type === 'income' ? '#10B981' : theme.colors.text }
-                                    ]}>
-                                        {item.type === 'income' ? '+' : '-'}{currencySymbol}{item.amount.toLocaleString()}
-                                    </Text>
-                                </View>
+                                </TouchableOpacity>
                                 <View style={styles.itemActions}>
                                     <TouchableOpacity
                                         style={[styles.actionBtn, { backgroundColor: theme.colors.surface }]}
@@ -379,7 +537,9 @@ export default function RecurringScreen() {
                 <View style={styles.modalOverlay}>
                     <View style={[styles.modalContent, { backgroundColor: theme.colors.background }]}>
                         <View style={styles.modalHeader}>
-                            <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Add Recurring</Text>
+                            <Text style={[styles.modalTitle, { color: theme.colors.text }]}>
+                                {editingItem ? 'Edit Recurring' : 'Add Recurring'}
+                            </Text>
                             <TouchableOpacity onPress={() => { setShowAddModal(false); resetForm(); }}>
                                 <MaterialIcons name="close" size={24} color={theme.colors.text} />
                             </TouchableOpacity>
@@ -505,18 +665,23 @@ export default function RecurringScreen() {
                                 placeholder="e.g., Netflix subscription"
                                 placeholderTextColor={theme.colors.textTertiary}
                             />
+                        </ScrollView>
 
+                        {/* Footer */}
+                        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) }]}>
                             <TouchableOpacity
                                 style={[styles.saveBtn, { backgroundColor: theme.colors.primary }]}
                                 onPress={handleAdd}
                             >
-                                <Text style={styles.saveBtnText}>Add Recurring</Text>
+                                <Text style={styles.saveBtnText}>
+                                    {editingItem ? 'Update Recurring' : 'Add Recurring'}
+                                </Text>
                             </TouchableOpacity>
-                        </ScrollView>
+                        </View>
                     </View>
                 </View>
             </Modal>
-        </SafeAreaView>
+        </SafeAreaView >
     );
 }
 
@@ -546,7 +711,7 @@ const styles = StyleSheet.create({
     actionBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, gap: 4 },
     actionText: { fontSize: 12, fontWeight: '500' },
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-    modalContent: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 40, maxHeight: '85%' },
+    modalContent: { borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%' },
     modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderBottomColor: 'rgba(0,0,0,0.08)' },
     modalTitle: { fontSize: 18, fontWeight: '600' },
     typeToggle: { flexDirection: 'row', marginHorizontal: 20, marginTop: 16, gap: 12 },
@@ -560,6 +725,7 @@ const styles = StyleSheet.create({
     freqRow: { flexDirection: 'row', marginHorizontal: 20, gap: 8 },
     freqBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
     freqText: { fontSize: 13, fontWeight: '500' },
-    saveBtn: { marginHorizontal: 20, marginTop: 24, paddingVertical: 16, borderRadius: 14, alignItems: 'center' },
+    footer: { paddingHorizontal: 20, paddingTop: 10 },
+    saveBtn: { paddingVertical: 16, borderRadius: 14, alignItems: 'center' },
     saveBtnText: { color: '#FFF', fontSize: 16, fontWeight: '600' },
 });

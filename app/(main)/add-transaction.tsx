@@ -10,7 +10,7 @@ import {
     Modal,
     ScrollView,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -18,7 +18,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../../utils/ThemeContext';
 import { useToast } from '../../components/Toast';
 import api from '../../utils/api';
-import { saveOfflineExpense, saveOfflineIncome, saveOfflineRecurring, getRecentParticipants, saveRecentParticipants } from '../../utils/offlineSync';
+import { saveOfflineExpense, saveOfflineIncome, saveOfflineRecurring, getRecentParticipants, saveRecentParticipants, shouldSaveOffline } from '../../utils/offlineSync';
 import SplitModal, { RecentParticipant } from '../../components/SplitModal';
 
 const CATEGORIES = [
@@ -67,6 +67,7 @@ export default function AddTransactionScreen() {
     const { theme } = useTheme();
     const router = useRouter();
     const { showToast } = useToast();
+    const insets = useSafeAreaInsets();
 
     // Type toggle: expense (default) or income
     const [isIncome, setIsIncome] = useState(false);
@@ -236,13 +237,13 @@ export default function AddTransactionScreen() {
                         showToast({ message: response.message || 'Failed to save income', type: 'error' });
                     }
                 } catch (error: any) {
-                    // Network error - save offline
-                    if (error.message?.includes('Network')) {
+                    // Check if should fallback to offline save
+                    if (shouldSaveOffline(error)) {
                         await saveOfflineIncome(incomeData);
                         showToast({ message: 'Income saved offline', type: 'success' });
                         router.back();
                     } else {
-                        showToast({ message: 'Failed to save income', type: 'error' });
+                        showToast({ message: error.message || 'Failed to save income', type: 'error' });
                     }
                 }
             } else {
@@ -306,8 +307,9 @@ export default function AddTransactionScreen() {
                         showToast({ message: response.message || 'Failed to save expense', type: 'error' });
                     }
                 } catch (error: any) {
-                    console.error('Expense save error:', error);
-                    if (error.message?.includes('Network')) {
+                    console.log('Expense save error (handled offline):', error);
+                    // Check if should fallback to offline save
+                    if (shouldSaveOffline(error)) {
                         await saveOfflineExpense({ ...expenseData, category: selectedCategory! });
                         // Save participants even when offline
                         if (isSplit && participants.length > 0) {
@@ -450,17 +452,18 @@ export default function AddTransactionScreen() {
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
-            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.flex}>
-                {/* Header */}
-                <View style={styles.header}>
-                    <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
-                        <MaterialIcons name="close" size={24} color={theme.colors.text} />
-                    </TouchableOpacity>
-                    <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Add Transaction</Text>
-                    <TouchableOpacity onPress={openCalculator} style={styles.headerBtn}>
-                        <MaterialIcons name="calculate" size={24} color={accentColor} />
-                    </TouchableOpacity>
-                </View>
+            {/* Header */}
+            <View style={styles.header}>
+                <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
+                    <MaterialIcons name="close" size={24} color={theme.colors.text} />
+                </TouchableOpacity>
+                <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Add Transaction</Text>
+                <TouchableOpacity onPress={openCalculator} style={styles.headerBtn}>
+                    <MaterialIcons name="calculate" size={24} color={accentColor} />
+                </TouchableOpacity>
+            </View>
+
+            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
 
                 <ScrollView style={styles.content} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }} keyboardShouldPersistTaps="handled">
                     {/* Type Toggle */}
@@ -587,8 +590,8 @@ export default function AddTransactionScreen() {
                                         <MaterialIcons name="group" size={20} color="#8B5CF6" />
                                     </View>
                                     <Text style={[styles.selectorText, { color: isSplit && participants.length > 0 ? theme.colors.text : theme.colors.textTertiary }]}>
-                                        {isSplit && participants.length > 0 
-                                            ? `Split with ${participants.length} ${participants.length === 1 ? 'person' : 'people'}` 
+                                        {isSplit && participants.length > 0
+                                            ? `Split with ${participants.length} ${participants.length === 1 ? 'person' : 'people'}`
                                             : 'Split this expense'}
                                     </Text>
                                 </View>
@@ -661,190 +664,190 @@ export default function AddTransactionScreen() {
                         multiline
                     />
                 </ScrollView>
+            </KeyboardAvoidingView>
 
-                {/* Save Button */}
-                <View style={styles.footer}>
-                    <TouchableOpacity
-                        style={[styles.saveBtn, { backgroundColor: accentColor }]}
-                        onPress={handleSubmit}
-                        disabled={loading}
-                    >
-                        <MaterialIcons name={isIncome ? 'arrow-downward' : 'arrow-upward'} size={20} color="#FFF" style={{ marginRight: 8 }} />
-                        <Text style={styles.saveBtnText}>
-                            {loading ? 'Saving...' : `Add ${isIncome ? 'Income' : 'Expense'} ${amount ? currencySymbol + amount : ''}`}
-                        </Text>
-                    </TouchableOpacity>
-                </View>
+            {/* Save Button */}
+            <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 10) + 30 }]}>
+                <TouchableOpacity
+                    style={[styles.saveBtn, { backgroundColor: accentColor }]}
+                    onPress={handleSubmit}
+                    disabled={loading}
+                >
+                    <MaterialIcons name={isIncome ? 'arrow-downward' : 'arrow-upward'} size={20} color="#FFF" style={{ marginRight: 8 }} />
+                    <Text style={styles.saveBtnText}>
+                        {loading ? 'Saving...' : `Add ${isIncome ? 'Income' : 'Expense'} ${amount ? currencySymbol + amount : ''}`}
+                    </Text>
+                </TouchableOpacity>
+            </View>
 
-                {/* Split Modal */}
-                <SplitModal
-                    visible={showSplitModal}
-                    onClose={() => setShowSplitModal(false)}
-                    totalAmount={parseFloat(amount) || 0}
-                    currencySymbol={currencySymbol}
-                    initialPayer={payer}
-                    initialParticipants={participants}
-                    initialSplitType={splitType}
-                    initialUserHasPaid={userHasPaidShare}
-                    recentParticipants={recentParticipants}
-                    onSave={handleSplitSave}
+            {/* Split Modal */}
+            <SplitModal
+                visible={showSplitModal}
+                onClose={() => setShowSplitModal(false)}
+                totalAmount={parseFloat(amount) || 0}
+                currencySymbol={currencySymbol}
+                initialPayer={payer}
+                initialParticipants={participants}
+                initialSplitType={splitType}
+                initialUserHasPaid={userHasPaidShare}
+                recentParticipants={recentParticipants}
+                onSave={handleSplitSave}
+            />
+
+            {/* Date Picker */}
+            {showDatePicker && (
+                <DateTimePicker
+                    value={transactionDate}
+                    mode="date"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={onDateChange}
+                    maximumDate={new Date()}
                 />
+            )}
 
-                {/* Date Picker */}
-                {showDatePicker && (
-                    <DateTimePicker
-                        value={transactionDate}
-                        mode="date"
-                        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                        onChange={onDateChange}
-                        maximumDate={new Date()}
-                    />
-                )}
+            {/* Time Picker */}
+            {showTimePicker && (
+                <DateTimePicker
+                    value={transactionDate}
+                    mode="time"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={onTimeChange}
+                />
+            )}
 
-                {/* Time Picker */}
-                {showTimePicker && (
-                    <DateTimePicker
-                        value={transactionDate}
-                        mode="time"
-                        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                        onChange={onTimeChange}
-                    />
-                )}
-
-                {/* Category Picker Modal */}
-                <Modal visible={showCategoryPicker} transparent animationType="fade" onRequestClose={() => setShowCategoryPicker(false)}>
-                    <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowCategoryPicker(false)}>
-                        <View style={[styles.modalContent, { backgroundColor: theme.colors.background }]} onStartShouldSetResponder={() => true}>
-                            <View style={styles.modalHeader}>
-                                <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Category</Text>
-                                <TouchableOpacity onPress={() => setShowCategoryPicker(false)}>
-                                    <MaterialIcons name="close" size={24} color={theme.colors.text} />
-                                </TouchableOpacity>
-                            </View>
-                            <ScrollView>
-                                {CATEGORIES.map((cat) => (
-                                    <TouchableOpacity
-                                        key={cat.name}
-                                        style={[styles.modalItem, { borderBottomColor: theme.colors.border }]}
-                                        onPress={() => { setSelectedCategory(cat.name); setShowCategoryPicker(false); }}
-                                    >
-                                        <View style={[styles.iconBox, { backgroundColor: cat.color + '20' }]}>
-                                            <MaterialIcons name={cat.icon as any} size={22} color={cat.color} />
-                                        </View>
-                                        <Text style={[styles.modalItemText, { color: theme.colors.text }]}>{cat.name}</Text>
-                                        {selectedCategory === cat.name && <MaterialIcons name="check" size={22} color={theme.colors.primary} />}
-                                    </TouchableOpacity>
-                                ))}
-                            </ScrollView>
-                        </View>
-                    </TouchableOpacity>
-                </Modal>
-
-                {/* Source Picker Modal */}
-                <Modal visible={showSourcePicker} transparent animationType="fade" onRequestClose={() => setShowSourcePicker(false)}>
-                    <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowSourcePicker(false)}>
-                        <View style={[styles.modalContent, { backgroundColor: theme.colors.background }]} onStartShouldSetResponder={() => true}>
-                            <View style={styles.modalHeader}>
-                                <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Income Source</Text>
-                                <TouchableOpacity onPress={() => setShowSourcePicker(false)}>
-                                    <MaterialIcons name="close" size={24} color={theme.colors.text} />
-                                </TouchableOpacity>
-                            </View>
-                            <ScrollView>
-                                {INCOME_SOURCES.map((src) => (
-                                    <TouchableOpacity
-                                        key={src.name}
-                                        style={[styles.modalItem, { borderBottomColor: theme.colors.border }]}
-                                        onPress={() => { setSelectedSource(src.name); setShowSourcePicker(false); }}
-                                    >
-                                        <View style={[styles.iconBox, { backgroundColor: src.color + '20' }]}>
-                                            <MaterialIcons name={src.icon as any} size={22} color={src.color} />
-                                        </View>
-                                        <Text style={[styles.modalItemText, { color: theme.colors.text }]}>{src.name}</Text>
-                                        {selectedSource === src.name && <MaterialIcons name="check" size={22} color="#10B981" />}
-                                    </TouchableOpacity>
-                                ))}
-                            </ScrollView>
-                        </View>
-                    </TouchableOpacity>
-                </Modal>
-
-                {/* Payment Picker Modal */}
-                <Modal visible={showPaymentPicker} transparent animationType="fade" onRequestClose={() => setShowPaymentPicker(false)}>
-                    <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowPaymentPicker(false)}>
-                        <View style={[styles.modalContent, { backgroundColor: theme.colors.background }]} onStartShouldSetResponder={() => true}>
-                            <View style={styles.modalHeader}>
-                                <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Payment Method</Text>
-                                <TouchableOpacity onPress={() => setShowPaymentPicker(false)}>
-                                    <MaterialIcons name="close" size={24} color={theme.colors.text} />
-                                </TouchableOpacity>
-                            </View>
-                            <ScrollView>
-                                {PAYMENT_METHODS.map((pay) => (
-                                    <TouchableOpacity
-                                        key={pay.id}
-                                        style={[styles.modalItem, { borderBottomColor: theme.colors.border }]}
-                                        onPress={() => { setPaymentMethod(pay.id); setShowPaymentPicker(false); }}
-                                    >
-                                        <View style={[styles.iconBox, { backgroundColor: pay.color + '20' }]}>
-                                            <MaterialIcons name={pay.icon as any} size={22} color={pay.color} />
-                                        </View>
-                                        <Text style={[styles.modalItemText, { color: theme.colors.text }]}>{pay.id}</Text>
-                                        {paymentMethod === pay.id && <MaterialIcons name="check" size={22} color={theme.colors.primary} />}
-                                    </TouchableOpacity>
-                                ))}
-                            </ScrollView>
-                        </View>
-                    </TouchableOpacity>
-                </Modal>
-
-                {/* Calculator Modal */}
-                <Modal visible={showCalculator} transparent animationType="fade" onRequestClose={() => setShowCalculator(false)}>
-                    <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowCalculator(false)}>
-                        <View style={[styles.calcModal, { backgroundColor: theme.colors.background }]} onStartShouldSetResponder={() => true}>
-                            <View style={styles.modalHeader}>
-                                <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Calculator</Text>
-                                <TouchableOpacity onPress={() => setShowCalculator(false)}>
-                                    <MaterialIcons name="close" size={24} color={theme.colors.text} />
-                                </TouchableOpacity>
-                            </View>
-                            <View style={[styles.calcDisplay, { backgroundColor: theme.colors.surface }]}>
-                                <Text style={[styles.calcDisplayText, { color: accentColor }]} numberOfLines={1}>
-                                    {currencySymbol}{calcDisplay}
-                                </Text>
-                            </View>
-                            <View style={styles.calcGrid}>
-                                {CALC_BUTTONS.map((row, rowIndex) => (
-                                    <View key={rowIndex} style={styles.calcRow}>
-                                        {row.map((btn) => {
-                                            const isOperator = ['/', '*', '-', '+', '='].includes(btn);
-                                            const isSpecial = ['C', 'DEL'].includes(btn);
-                                            return (
-                                                <TouchableOpacity
-                                                    key={btn}
-                                                    style={[
-                                                        styles.calcBtn,
-                                                        { backgroundColor: isOperator ? accentColor : isSpecial ? theme.colors.error + '20' : theme.colors.surface },
-                                                    ]}
-                                                    onPress={() => handleCalcPress(btn)}
-                                                >
-                                                    <Text style={[styles.calcBtnText, { color: isOperator ? '#FFF' : isSpecial ? theme.colors.error : theme.colors.text }]}>
-                                                        {btn}
-                                                    </Text>
-                                                </TouchableOpacity>
-                                            );
-                                        })}
-                                    </View>
-                                ))}
-                            </View>
-                            <TouchableOpacity style={[styles.calcApplyBtn, { backgroundColor: accentColor }]} onPress={applyCalcResult}>
-                                <Text style={styles.calcApplyText}>Use this amount</Text>
+            {/* Category Picker Modal */}
+            <Modal visible={showCategoryPicker} transparent animationType="fade" onRequestClose={() => setShowCategoryPicker(false)}>
+                <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowCategoryPicker(false)}>
+                    <View style={[styles.modalContent, { backgroundColor: theme.colors.background }]} onStartShouldSetResponder={() => true}>
+                        <View style={styles.modalHeader}>
+                            <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Category</Text>
+                            <TouchableOpacity onPress={() => setShowCategoryPicker(false)}>
+                                <MaterialIcons name="close" size={24} color={theme.colors.text} />
                             </TouchableOpacity>
                         </View>
-                    </TouchableOpacity>
-                </Modal>
-            </KeyboardAvoidingView>
-        </SafeAreaView>
+                        <ScrollView>
+                            {CATEGORIES.map((cat) => (
+                                <TouchableOpacity
+                                    key={cat.name}
+                                    style={[styles.modalItem, { borderBottomColor: theme.colors.border }]}
+                                    onPress={() => { setSelectedCategory(cat.name); setShowCategoryPicker(false); }}
+                                >
+                                    <View style={[styles.iconBox, { backgroundColor: cat.color + '20' }]}>
+                                        <MaterialIcons name={cat.icon as any} size={22} color={cat.color} />
+                                    </View>
+                                    <Text style={[styles.modalItemText, { color: theme.colors.text }]}>{cat.name}</Text>
+                                    {selectedCategory === cat.name && <MaterialIcons name="check" size={22} color={theme.colors.primary} />}
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </View>
+                </TouchableOpacity>
+            </Modal>
+
+            {/* Source Picker Modal */}
+            <Modal visible={showSourcePicker} transparent animationType="fade" onRequestClose={() => setShowSourcePicker(false)}>
+                <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowSourcePicker(false)}>
+                    <View style={[styles.modalContent, { backgroundColor: theme.colors.background }]} onStartShouldSetResponder={() => true}>
+                        <View style={styles.modalHeader}>
+                            <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Income Source</Text>
+                            <TouchableOpacity onPress={() => setShowSourcePicker(false)}>
+                                <MaterialIcons name="close" size={24} color={theme.colors.text} />
+                            </TouchableOpacity>
+                        </View>
+                        <ScrollView>
+                            {INCOME_SOURCES.map((src) => (
+                                <TouchableOpacity
+                                    key={src.name}
+                                    style={[styles.modalItem, { borderBottomColor: theme.colors.border }]}
+                                    onPress={() => { setSelectedSource(src.name); setShowSourcePicker(false); }}
+                                >
+                                    <View style={[styles.iconBox, { backgroundColor: src.color + '20' }]}>
+                                        <MaterialIcons name={src.icon as any} size={22} color={src.color} />
+                                    </View>
+                                    <Text style={[styles.modalItemText, { color: theme.colors.text }]}>{src.name}</Text>
+                                    {selectedSource === src.name && <MaterialIcons name="check" size={22} color="#10B981" />}
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </View>
+                </TouchableOpacity>
+            </Modal>
+
+            {/* Payment Picker Modal */}
+            <Modal visible={showPaymentPicker} transparent animationType="fade" onRequestClose={() => setShowPaymentPicker(false)}>
+                <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowPaymentPicker(false)}>
+                    <View style={[styles.modalContent, { backgroundColor: theme.colors.background }]} onStartShouldSetResponder={() => true}>
+                        <View style={styles.modalHeader}>
+                            <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Payment Method</Text>
+                            <TouchableOpacity onPress={() => setShowPaymentPicker(false)}>
+                                <MaterialIcons name="close" size={24} color={theme.colors.text} />
+                            </TouchableOpacity>
+                        </View>
+                        <ScrollView>
+                            {PAYMENT_METHODS.map((pay) => (
+                                <TouchableOpacity
+                                    key={pay.id}
+                                    style={[styles.modalItem, { borderBottomColor: theme.colors.border }]}
+                                    onPress={() => { setPaymentMethod(pay.id); setShowPaymentPicker(false); }}
+                                >
+                                    <View style={[styles.iconBox, { backgroundColor: pay.color + '20' }]}>
+                                        <MaterialIcons name={pay.icon as any} size={22} color={pay.color} />
+                                    </View>
+                                    <Text style={[styles.modalItemText, { color: theme.colors.text }]}>{pay.id}</Text>
+                                    {paymentMethod === pay.id && <MaterialIcons name="check" size={22} color={theme.colors.primary} />}
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </View>
+                </TouchableOpacity>
+            </Modal>
+
+            {/* Calculator Modal */}
+            <Modal visible={showCalculator} transparent animationType="fade" onRequestClose={() => setShowCalculator(false)}>
+                <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowCalculator(false)}>
+                    <View style={[styles.calcModal, { backgroundColor: theme.colors.background }]} onStartShouldSetResponder={() => true}>
+                        <View style={styles.modalHeader}>
+                            <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Calculator</Text>
+                            <TouchableOpacity onPress={() => setShowCalculator(false)}>
+                                <MaterialIcons name="close" size={24} color={theme.colors.text} />
+                            </TouchableOpacity>
+                        </View>
+                        <View style={[styles.calcDisplay, { backgroundColor: theme.colors.surface }]}>
+                            <Text style={[styles.calcDisplayText, { color: accentColor }]} numberOfLines={1}>
+                                {currencySymbol}{calcDisplay}
+                            </Text>
+                        </View>
+                        <View style={styles.calcGrid}>
+                            {CALC_BUTTONS.map((row, rowIndex) => (
+                                <View key={rowIndex} style={styles.calcRow}>
+                                    {row.map((btn) => {
+                                        const isOperator = ['/', '*', '-', '+', '='].includes(btn);
+                                        const isSpecial = ['C', 'DEL'].includes(btn);
+                                        return (
+                                            <TouchableOpacity
+                                                key={btn}
+                                                style={[
+                                                    styles.calcBtn,
+                                                    { backgroundColor: isOperator ? accentColor : isSpecial ? theme.colors.error + '20' : theme.colors.surface },
+                                                ]}
+                                                onPress={() => handleCalcPress(btn)}
+                                            >
+                                                <Text style={[styles.calcBtnText, { color: isOperator ? '#FFF' : isSpecial ? theme.colors.error : theme.colors.text }]}>
+                                                    {btn}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </View>
+                            ))}
+                        </View>
+                        <TouchableOpacity style={[styles.calcApplyBtn, { backgroundColor: accentColor }]} onPress={applyCalcResult}>
+                            <Text style={styles.calcApplyText}>Use this amount</Text>
+                        </TouchableOpacity>
+                    </View>
+                </TouchableOpacity>
+            </Modal>
+        </SafeAreaView >
     );
 }
 
@@ -871,7 +874,7 @@ const styles = StyleSheet.create({
     iconBox: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
     selectorText: { fontSize: 16 },
     noteInput: { padding: 14, borderRadius: 12, fontSize: 16, minHeight: 70, textAlignVertical: 'top' },
-    footer: { padding: 20 },
+    footer: { paddingHorizontal: 25, paddingTop: 10 },
     saveBtn: { flexDirection: 'row', paddingVertical: 16, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
     saveBtnText: { color: '#FFF', fontSize: 17, fontWeight: '600' },
 

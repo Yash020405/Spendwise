@@ -20,7 +20,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTheme } from '../../utils/ThemeContext';
 import { useToast } from '../../components/Toast';
 import api from '../../utils/api';
-import { getMergedIncome, savePendingIncomeUpdate, savePendingIncomeDelete } from '../../utils/offlineSync';
+import { getMergedIncome, savePendingIncomeUpdate, savePendingIncomeDelete, shouldSaveOffline } from '../../utils/offlineSync';
 
 const INCOME_SOURCES = [
     { name: 'Salary', icon: 'payments', color: '#10B981' },
@@ -154,8 +154,8 @@ export default function EditIncomeScreen() {
             throw new Error('No auth token');
 
         } catch (error: any) {
-            console.error('Update error:', error);
-            if (error.message === 'Network request failed' || (error.message && error.message.includes('Network'))) {
+            console.log('Income update error (handled offline):', error);
+            if (shouldSaveOffline(error)) {
                 await savePendingIncomeUpdate(incomeId, {
                     amount: parseFloat(amount),
                     source: selectedSource,
@@ -201,7 +201,7 @@ export default function EditIncomeScreen() {
                             }
                             throw new Error('No auth token');
                         } catch (error: any) {
-                            if (error.message === 'Network request failed' || (error.message && error.message.includes('Network'))) {
+                            if (shouldSaveOffline(error)) {
                                 await savePendingIncomeDelete(incomeId);
                                 showToast({ message: 'Income deleted offline', type: 'info' });
                                 router.back();
@@ -286,21 +286,22 @@ export default function EditIncomeScreen() {
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
-            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.flex}>
-                {/* Header */}
-                <View style={styles.header}>
-                    <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
-                        <MaterialIcons name="arrow-back" size={24} color={theme.colors.text} />
-                    </TouchableOpacity>
-                    <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Edit Income</Text>
-                    <TouchableOpacity onPress={handleDelete} style={styles.headerBtn}>
-                        <MaterialIcons name="delete-outline" size={24} color="#EF4444" />
-                    </TouchableOpacity>
-                </View>
+            {/* Header */}
+            <View style={styles.header}>
+                <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
+                    <MaterialIcons name="arrow-back" size={24} color={theme.colors.text} />
+                </TouchableOpacity>
+                <Text style={[styles.headerTitle, { color: theme.colors.text }]}>Edit Income</Text>
+                <TouchableOpacity onPress={handleDelete} style={styles.headerBtn}>
+                    <MaterialIcons name="delete-outline" size={24} color="#EF4444" />
+                </TouchableOpacity>
+            </View>
 
-                <ScrollView 
-                    style={styles.content} 
-                    showsVerticalScrollIndicator={false} 
+            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
+
+                <ScrollView
+                    style={styles.content}
+                    showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
                     contentContainerStyle={{ paddingBottom: 100 }}
                 >
@@ -378,122 +379,122 @@ export default function EditIncomeScreen() {
                         multiline
                     />
                 </ScrollView>
+            </KeyboardAvoidingView>
 
-                {/* Update Button */}
-                <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 0) + 30 }]}>
-                    <TouchableOpacity
-                        style={[styles.saveBtn, { backgroundColor: selectedSrc?.color || theme.colors.primary }]}
-                        onPress={handleUpdate}
-                        disabled={saving}
-                    >
-                        <Text style={styles.saveBtnText}>{saving ? 'Updating...' : 'Update'}</Text>
-                    </TouchableOpacity>
-                </View>
+            {/* Update Button */}
+            <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 0) + 30 }]}>
+                <TouchableOpacity
+                    style={[styles.saveBtn, { backgroundColor: selectedSrc?.color || theme.colors.primary }]}
+                    onPress={handleUpdate}
+                    disabled={saving}
+                >
+                    <Text style={styles.saveBtnText}>{saving ? 'Updating...' : 'Update'}</Text>
+                </TouchableOpacity>
+            </View>
 
-                {/* Native Date Pickers */}
-                {showDatePicker && (
-                    <DateTimePicker
-                        value={transactionDate}
-                        mode="date"
-                        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                        onChange={onDateChange}
-                        maximumDate={new Date()}
-                    />
-                )}
-                {showTimePicker && (
-                    <DateTimePicker
-                        value={transactionDate}
-                        mode="time"
-                        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                        onChange={onTimeChange}
-                    />
-                )}
+            {/* Native Date Pickers */}
+            {showDatePicker && (
+                <DateTimePicker
+                    value={transactionDate}
+                    mode="date"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={onDateChange}
+                    maximumDate={new Date()}
+                />
+            )}
+            {showTimePicker && (
+                <DateTimePicker
+                    value={transactionDate}
+                    mode="time"
+                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                    onChange={onTimeChange}
+                />
+            )}
 
-                {/* Source Picker */}
-                <Modal visible={showSourcePicker} transparent animationType="fade" onRequestClose={() => setShowSourcePicker(false)}>
-                    <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowSourcePicker(false)}>
-                        <View style={[styles.modalContent, { backgroundColor: theme.colors.background }]} onStartShouldSetResponder={() => true}>
-                            <View style={styles.modalHeader}>
-                                <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Source</Text>
-                                <TouchableOpacity onPress={() => setShowSourcePicker(false)}>
-                                    <MaterialIcons name="close" size={24} color={theme.colors.text} />
-                                </TouchableOpacity>
-                            </View>
-                            <ScrollView>
-                                {INCOME_SOURCES.map((src) => (
-                                    <TouchableOpacity
-                                        key={src.name}
-                                        style={[styles.modalItem, { borderBottomColor: theme.colors.border }]}
-                                        onPress={() => { setSelectedSource(src.name); setShowSourcePicker(false); }}
-                                    >
-                                        <View style={[styles.iconBox, { backgroundColor: src.color + '20' }]}>
-                                            <MaterialIcons name={src.icon as any} size={22} color={src.color} />
-                                        </View>
-                                        <Text style={[styles.modalItemText, { color: theme.colors.text }]}>{src.name}</Text>
-                                        {selectedSource === src.name && <MaterialIcons name="check" size={22} color={theme.colors.primary} />}
-                                    </TouchableOpacity>
-                                ))}
-                            </ScrollView>
-                        </View>
-                    </TouchableOpacity>
-                </Modal>
-
-                {/* Calculator */}
-                <Modal visible={showCalculator} transparent animationType="fade" onRequestClose={() => setShowCalculator(false)}>
-                    <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowCalculator(false)}>
-                        <View style={[styles.calcModal, { backgroundColor: theme.colors.background }]} onStartShouldSetResponder={() => true}>
-                            <View style={styles.modalHeader}>
-                                <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Calculator</Text>
-                                <TouchableOpacity onPress={() => setShowCalculator(false)}>
-                                    <MaterialIcons name="close" size={24} color={theme.colors.text} />
-                                </TouchableOpacity>
-                            </View>
-
-                            <View style={[styles.calcDisplay, { backgroundColor: theme.colors.surface }]}>
-                                <Text style={[styles.calcDisplayText, { color: theme.colors.text }]} numberOfLines={1}>
-                                    {currencySymbol}{calcDisplay}
-                                </Text>
-                            </View>
-
-                            <View style={styles.calcGrid}>
-                                {CALC_BUTTONS.map((row, rowIndex) => (
-                                    <View key={rowIndex} style={styles.calcRow}>
-                                        {row.map((btn) => {
-                                            const isOperator = ['/', '*', '-', '+', '='].includes(btn);
-                                            const isSpecial = ['C', 'DEL'].includes(btn);
-                                            return (
-                                                <TouchableOpacity
-                                                    key={btn}
-                                                    style={[
-                                                        styles.calcBtn,
-                                                        { backgroundColor: isOperator ? theme.colors.primary : isSpecial ? theme.colors.error + '20' : theme.colors.surface },
-                                                    ]}
-                                                    onPress={() => handleCalcPress(btn)}
-                                                >
-                                                    <Text style={[
-                                                        styles.calcBtnText,
-                                                        { color: isOperator ? '#FFF' : isSpecial ? theme.colors.error : theme.colors.text }
-                                                    ]}>
-                                                        {btn}
-                                                    </Text>
-                                                </TouchableOpacity>
-                                            );
-                                        })}
-                                    </View>
-                                ))}
-                            </View>
-
-                            <TouchableOpacity
-                                style={[styles.calcApplyBtn, { backgroundColor: theme.colors.primary }]}
-                                onPress={applyCalcResult}
-                            >
-                                <Text style={styles.calcApplyText}>Use this amount</Text>
+            {/* Source Picker */}
+            <Modal visible={showSourcePicker} transparent animationType="fade" onRequestClose={() => setShowSourcePicker(false)}>
+                <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowSourcePicker(false)}>
+                    <View style={[styles.modalContent, { backgroundColor: theme.colors.background }]} onStartShouldSetResponder={() => true}>
+                        <View style={styles.modalHeader}>
+                            <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Source</Text>
+                            <TouchableOpacity onPress={() => setShowSourcePicker(false)}>
+                                <MaterialIcons name="close" size={24} color={theme.colors.text} />
                             </TouchableOpacity>
                         </View>
-                    </TouchableOpacity>
-                </Modal>
-            </KeyboardAvoidingView>
-        </SafeAreaView>
+                        <ScrollView>
+                            {INCOME_SOURCES.map((src) => (
+                                <TouchableOpacity
+                                    key={src.name}
+                                    style={[styles.modalItem, { borderBottomColor: theme.colors.border }]}
+                                    onPress={() => { setSelectedSource(src.name); setShowSourcePicker(false); }}
+                                >
+                                    <View style={[styles.iconBox, { backgroundColor: src.color + '20' }]}>
+                                        <MaterialIcons name={src.icon as any} size={22} color={src.color} />
+                                    </View>
+                                    <Text style={[styles.modalItemText, { color: theme.colors.text }]}>{src.name}</Text>
+                                    {selectedSource === src.name && <MaterialIcons name="check" size={22} color={theme.colors.primary} />}
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    </View>
+                </TouchableOpacity>
+            </Modal>
+
+            {/* Calculator */}
+            <Modal visible={showCalculator} transparent animationType="fade" onRequestClose={() => setShowCalculator(false)}>
+                <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowCalculator(false)}>
+                    <View style={[styles.calcModal, { backgroundColor: theme.colors.background }]} onStartShouldSetResponder={() => true}>
+                        <View style={styles.modalHeader}>
+                            <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Calculator</Text>
+                            <TouchableOpacity onPress={() => setShowCalculator(false)}>
+                                <MaterialIcons name="close" size={24} color={theme.colors.text} />
+                            </TouchableOpacity>
+                        </View>
+
+                        <View style={[styles.calcDisplay, { backgroundColor: theme.colors.surface }]}>
+                            <Text style={[styles.calcDisplayText, { color: theme.colors.text }]} numberOfLines={1}>
+                                {currencySymbol}{calcDisplay}
+                            </Text>
+                        </View>
+
+                        <View style={styles.calcGrid}>
+                            {CALC_BUTTONS.map((row, rowIndex) => (
+                                <View key={rowIndex} style={styles.calcRow}>
+                                    {row.map((btn) => {
+                                        const isOperator = ['/', '*', '-', '+', '='].includes(btn);
+                                        const isSpecial = ['C', 'DEL'].includes(btn);
+                                        return (
+                                            <TouchableOpacity
+                                                key={btn}
+                                                style={[
+                                                    styles.calcBtn,
+                                                    { backgroundColor: isOperator ? theme.colors.primary : isSpecial ? theme.colors.error + '20' : theme.colors.surface },
+                                                ]}
+                                                onPress={() => handleCalcPress(btn)}
+                                            >
+                                                <Text style={[
+                                                    styles.calcBtnText,
+                                                    { color: isOperator ? '#FFF' : isSpecial ? theme.colors.error : theme.colors.text }
+                                                ]}>
+                                                    {btn}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </View>
+                            ))}
+                        </View>
+
+                        <TouchableOpacity
+                            style={[styles.calcApplyBtn, { backgroundColor: theme.colors.primary }]}
+                            onPress={applyCalcResult}
+                        >
+                            <Text style={styles.calcApplyText}>Use this amount</Text>
+                        </TouchableOpacity>
+                    </View>
+                </TouchableOpacity>
+            </Modal>
+        </SafeAreaView >
     );
 }
 

@@ -8,9 +8,32 @@ const PENDING_INCOME_KEY = '@pending_income';
 const PENDING_RECURRING_KEY = '@pending_recurring';
 const CACHED_INCOME_KEY = '@cached_income';
 const CACHED_RECURRING_KEY = '@cached_recurring';
+const PENDING_RECURRING_UPDATES_KEY = '@pending_recurring_updates';
+const PENDING_RECURRING_DELETES_KEY = '@pending_recurring_deletes';
 
 const PENDING_INCOME_UPDATES_KEY = '@pending_income_updates';
 const PENDING_INCOME_DELETES_KEY = '@pending_income_deletes';
+
+// Helper to determine if an error should trigger offline saving
+export const shouldSaveOffline = (error: any): boolean => {
+  // If it's a known API error with a code
+  if (error.code) {
+    // Auth errors (1xxx) - don't save offline, user needs to login
+    if (error.code >= 1000 && error.code < 2000) return false;
+
+    // Validation errors (2xxx) - don't save offline, invalid data
+    if (error.code >= 2000 && error.code < 3000) return false;
+
+    // Resource errors (3xxx) - don't save offline (e.g. 404)
+    if (error.code >= 3000 && error.code < 4000) return false;
+
+    // Server errors (6xxx) or Rate limits (5xxx) or Sync errors (8xxx) -> Save offline
+    return true;
+  }
+
+  // For any generic error (network failed, fetch failed, timeout, etc.) -> Save offline
+  return true;
+};
 
 interface PendingExpense {
   id: string;
@@ -234,7 +257,7 @@ export const getCachedExpenses = async (): Promise<any[]> => {
 // Update a single expense in cache
 export const updateCachedExpense = async (expenseId: string, updates: any): Promise<void> => {
   const cached = await getCachedExpenses();
-  const updatedCache = cached.map((expense: any) => 
+  const updatedCache = cached.map((expense: any) =>
     expense._id === expenseId ? { ...expense, ...updates } : expense
   );
   await cacheExpenses(updatedCache);
@@ -480,6 +503,54 @@ export const cacheRecurring = async (recurring: any[]): Promise<void> => {
   await AsyncStorage.setItem(CACHED_RECURRING_KEY, JSON.stringify(recurring));
 };
 
+// Update pending recurring
+export const updatePendingRecurring = async (id: string, updates: Partial<PendingRecurring>): Promise<void> => {
+  const pending = await getPendingRecurring();
+  const index = pending.findIndex(p => p.id === id);
+  if (index >= 0) {
+    pending[index] = { ...pending[index], ...updates };
+    await AsyncStorage.setItem(PENDING_RECURRING_KEY, JSON.stringify(pending));
+  }
+};
+
+// Delete pending recurring
+export const deletePendingRecurring = async (id: string): Promise<void> => {
+  const pending = await getPendingRecurring();
+  const filtered = pending.filter(p => p.id !== id);
+  await AsyncStorage.setItem(PENDING_RECURRING_KEY, JSON.stringify(filtered));
+};
+
+// Pending recurring updates (for server items edited while offline)
+export const getPendingRecurringUpdates = async (): Promise<PendingUpdate[]> => {
+  const data = await AsyncStorage.getItem(PENDING_RECURRING_UPDATES_KEY);
+  return data ? JSON.parse(data) : [];
+};
+
+export const savePendingRecurringUpdate = async (id: string, updateData: any): Promise<void> => {
+  const pending = await getPendingRecurringUpdates();
+  const existingIndex = pending.findIndex(p => p.id === id);
+  if (existingIndex >= 0) {
+    pending[existingIndex].data = { ...pending[existingIndex].data, ...updateData };
+  } else {
+    pending.push({ id, data: updateData });
+  }
+  await AsyncStorage.setItem(PENDING_RECURRING_UPDATES_KEY, JSON.stringify(pending));
+};
+
+// Pending recurring deletes (for server items deleted while offline)
+export const getPendingRecurringDeletes = async (): Promise<string[]> => {
+  const data = await AsyncStorage.getItem(PENDING_RECURRING_DELETES_KEY);
+  return data ? JSON.parse(data) : [];
+};
+
+export const savePendingRecurringDelete = async (id: string): Promise<void> => {
+  const pending = await getPendingRecurringDeletes();
+  if (!pending.includes(id)) {
+    pending.push(id);
+    await AsyncStorage.setItem(PENDING_RECURRING_DELETES_KEY, JSON.stringify(pending));
+  }
+};
+
 // Get cached recurring
 export const getCachedRecurring = async (): Promise<any[]> => {
   const data = await AsyncStorage.getItem(CACHED_RECURRING_KEY);
@@ -490,8 +561,20 @@ export const getCachedRecurring = async (): Promise<any[]> => {
 export const getMergedRecurring = async (): Promise<any[]> => {
   const cached = await getCachedRecurring();
   const pending = await getPendingRecurring();
+  // Apply pending updates/deletes (server-item edits or removes queued while offline)
+  const pendingUpdates = await getPendingRecurringUpdates();
+  const pendingDeletes = await getPendingRecurringDeletes();
 
-  // Add pending offline recurring
+  // Filter out deleted server items
+  let merged = cached.filter((r: any) => !pendingDeletes.includes(r._id));
+
+  // Apply pending updates to cached items
+  merged = merged.map((r: any) => {
+    const upd = pendingUpdates.find(u => u.id === r._id);
+    return upd ? { ...r, ...upd.data } : r;
+  });
+
+  // Add pending offline recurring (new creates not yet on server)
   const offlineRecurring = pending.map(p => ({
     _id: p.id,
     type: p.type,
@@ -506,7 +589,7 @@ export const getMergedRecurring = async (): Promise<any[]> => {
   }));
 
   // Combine
-  return [...cached, ...offlineRecurring];
+  return [...merged, ...offlineRecurring];
 };
 
 // Sync pending recurring to server
@@ -544,6 +627,52 @@ export const syncPendingRecurring = async (token: string): Promise<{ synced: num
   if (successfulCreates.length > 0) {
     const remaining = pendingRecurring.filter(r => !successfulCreates.includes(r.id));
     await AsyncStorage.setItem(PENDING_RECURRING_KEY, JSON.stringify(remaining));
+  }
+
+  // Sync recurring updates (for server items edited while offline)
+  const pendingUpdates = await getPendingRecurringUpdates();
+  const successfulUpdates: string[] = [];
+
+  for (const update of pendingUpdates) {
+    try {
+      const response: any = await api.updateRecurring(token, update.id, update.data);
+      if (response.success) {
+        successfulUpdates.push(update.id);
+        synced++;
+      } else {
+        errors++;
+      }
+    } catch (e) {
+      errors++;
+    }
+  }
+
+  if (successfulUpdates.length > 0) {
+    const remaining = pendingUpdates.filter(u => !successfulUpdates.includes(u.id));
+    await AsyncStorage.setItem(PENDING_RECURRING_UPDATES_KEY, JSON.stringify(remaining));
+  }
+
+  // Sync recurring deletes (for server items deleted while offline)
+  const pendingDeletes = await getPendingRecurringDeletes();
+  const successfulDeletes: string[] = [];
+
+  for (const id of pendingDeletes) {
+    try {
+      const response: any = await api.deleteRecurring(token, id);
+      if (response && response.success !== false) {
+        successfulDeletes.push(id);
+        synced++;
+      } else {
+        errors++;
+      }
+    } catch (e) {
+      errors++;
+    }
+  }
+
+  if (successfulDeletes.length > 0) {
+    const remaining = pendingDeletes.filter(id => !successfulDeletes.includes(id));
+    await AsyncStorage.setItem(PENDING_RECURRING_DELETES_KEY, JSON.stringify(remaining));
   }
 
   return { synced, errors };
@@ -609,7 +738,7 @@ export const getRecentParticipants = async (): Promise<RecentParticipant[]> => {
   try {
     const key = await getParticipantsKey();
     if (!key) return [];
-    
+
     const data = await AsyncStorage.getItem(key);
     return data ? JSON.parse(data) : [];
   } catch {
@@ -622,15 +751,15 @@ export const saveRecentParticipants = async (participants: { name: string; phone
   try {
     const key = await getParticipantsKey();
     if (!key) return;
-    
+
     const existing = await getRecentParticipants();
     const participantsMap = new Map<string, RecentParticipant>();
-    
+
     // Add existing participants first
     existing.forEach(p => {
       participantsMap.set(p.name.toLowerCase(), p);
     });
-    
+
     // Add/update with new participants
     participants.forEach(p => {
       const mapKey = p.name.toLowerCase();
@@ -642,7 +771,7 @@ export const saveRecentParticipants = async (participants: { name: string; phone
         participantsMap.set(mapKey, { name: p.name, phone: p.phone });
       }
     });
-    
+
     await AsyncStorage.setItem(key, JSON.stringify(Array.from(participantsMap.values())));
   } catch {
     // Silent fail
@@ -654,11 +783,11 @@ export const updateRecentParticipant = async (oldName: string, newName: string, 
   try {
     const key = await getParticipantsKey();
     if (!key) return;
-    
+
     const participants = await getRecentParticipants();
-    const updated = participants.map(p => 
-      p.name.toLowerCase() === oldName.toLowerCase() 
-        ? { name: newName, phone: newPhone } 
+    const updated = participants.map(p =>
+      p.name.toLowerCase() === oldName.toLowerCase()
+        ? { name: newName, phone: newPhone }
         : p
     );
     await AsyncStorage.setItem(key, JSON.stringify(updated));
